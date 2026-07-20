@@ -1,0 +1,9 @@
+L = 6
+beta = 0.22
+n_therm = 0
+n_sweeps = 20
+measure_every = 5
+seed = 67890
+start = restart
+config_file = example_config.dat
+data_file = example_data.dat

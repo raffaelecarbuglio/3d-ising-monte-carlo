@@ -1,0 +1,6 @@
+*.o
+*.tmp
+ising
+tests
+example_config.dat
+example_data.dat
