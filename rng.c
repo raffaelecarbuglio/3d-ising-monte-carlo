@@ -9,12 +9,12 @@ static uint32_t pcg32_next(Pcg32 *rng)
     return (shifted >> rotation) | (shifted << ((-rotation) & 31u));
 }
 
-void pcg32_seed(Pcg32 *rng, uint64_t seed)
+void pcg32_seed(Pcg32 *rng, int seed)
 {
     rng->state = 0u;
     rng->increment = (UINT64_C(54) << 1u) | 1u;
     pcg32_next(rng);
-    rng->state += seed;
+    rng->state += (uint64_t)seed;
     pcg32_next(rng);
 }
 

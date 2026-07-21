@@ -76,10 +76,10 @@ Significato dei parametri:
 
 - `L`: lato del reticolo, almeno 2.
 - `beta`: inverso della temperatura, non negativo.
-- `n_therm`: sweep iniziali di termalizzazione, non misurati.
+- `n_therm`: sweep iniziali di termalizzazione, non misurati e non negativi.
 - `n_sweeps`: sweep di produzione del segmento, maggiore di zero.
 - `measure_every`: intervallo tra le misure, maggiore di zero.
-- `seed`: seed usato per inizializzare PCG32.
+- `seed`: intero non negativo usato per inizializzare PCG32.
 - `start`: `ordered`, `random` oppure `restart`.
 - `config_file`: configurazione da salvare; durante un restart viene prima
   caricata e poi sostituita con il checkpoint aggiornato.

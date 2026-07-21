@@ -143,7 +143,7 @@ static void test_lattice(void)
 
     pcg32_seed(&rng, 123);
     ising_fill_ordered(&lattice);
-    check(ising_metropolis_sweep(&lattice, 0.0, &rng) == lattice.n_spins,
+    check(ising_metropolis_sweep(&lattice, 0.0, &rng) == (int)lattice.n_spins,
           "a beta=0 ogni sito e' aggiornato una volta");
 
     for (i = 0; i < lattice.n_spins; i++) {
@@ -189,7 +189,7 @@ static void test_save_load(void)
     IsingLattice original;
     IsingLattice loaded;
     Pcg32 rng;
-    uint64_t saved_sweeps = 0;
+    int saved_sweeps = 0;
     int load_ok;
 
     ising_create(&original, 3);

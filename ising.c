@@ -1,5 +1,4 @@
 #include "ising.h"
-#include <inttypes.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -131,9 +130,9 @@ int64_t ising_total_magnetization(const IsingLattice *lattice)
     return magnetization;
 }
 
-uint64_t ising_metropolis_sweep(IsingLattice *lattice, double beta, Pcg32 *rng)
+int ising_metropolis_sweep(IsingLattice *lattice, double beta, Pcg32 *rng)
 {
-    uint64_t accepted = 0;
+    int accepted = 0;
     int x;
     int y;
     int z;
@@ -161,7 +160,7 @@ uint64_t ising_metropolis_sweep(IsingLattice *lattice, double beta, Pcg32 *rng)
 }
 
 int ising_save_configuration(const char *filename, const IsingLattice *lattice,
-                             uint64_t production_sweeps)
+                             int production_sweeps)
 {
     FILE *file;
     size_t i;
@@ -173,7 +172,7 @@ int ising_save_configuration(const char *filename, const IsingLattice *lattice,
         return 0;
     }
 
-    fprintf(file, "L %d\nproduction_sweeps %" PRIu64 "\nspins\n",
+    fprintf(file, "L %d\nproduction_sweeps %d\nspins\n",
             lattice->L, production_sweeps);
 
     for (i = 0; i < lattice->n_spins; i++) {
@@ -202,12 +201,12 @@ int ising_save_configuration(const char *filename, const IsingLattice *lattice,
 }
 
 int ising_load_configuration(const char *filename, IsingLattice *lattice,
-                             uint64_t *production_sweeps)
+                             int *production_sweeps)
 {
     FILE *file;
     char label[64];
     int file_L;
-    uint64_t saved_sweeps;
+    int saved_sweeps;
     size_t i;
 
     file = fopen(filename, "r");
@@ -230,7 +229,7 @@ int ising_load_configuration(const char *filename, IsingLattice *lattice,
         return 0;
     }
 
-    if (fscanf(file, "%63s %" SCNu64, label, &saved_sweeps) != 2 ||
+    if (fscanf(file, "%63s %d", label, &saved_sweeps) != 2 ||
         strcmp(label, "production_sweeps") != 0 ||
         fscanf(file, "%63s", label) != 1 ||
         strcmp(label, "spins") != 0) {

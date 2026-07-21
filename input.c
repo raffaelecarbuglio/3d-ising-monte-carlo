@@ -1,5 +1,4 @@
 #include "input.h"
-#include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -17,11 +16,11 @@ int input_read(const char *filename, SimulationParameters *parameters)
 
     fields_read += fscanf(file, "L = %d", &parameters->L);
     fields_read += fscanf(file, "\nbeta = %lf", &parameters->beta);
-    fields_read += fscanf(file, "\nn_therm = %" SCNu64, &parameters->n_therm);
-    fields_read += fscanf(file, "\nn_sweeps = %" SCNu64, &parameters->n_sweeps);
-    fields_read += fscanf(file, "\nmeasure_every = %" SCNu64,
+    fields_read += fscanf(file, "\nn_therm = %d", &parameters->n_therm);
+    fields_read += fscanf(file, "\nn_sweeps = %d", &parameters->n_sweeps);
+    fields_read += fscanf(file, "\nmeasure_every = %d",
                           &parameters->measure_every);
-    fields_read += fscanf(file, "\nseed = %" SCNu64, &parameters->seed);
+    fields_read += fscanf(file, "\nseed = %d", &parameters->seed);
     fields_read += fscanf(file, "\nstart = %15s", start);
 
     if (fields_read != 7) {
@@ -59,13 +58,23 @@ int input_read(const char *filename, SimulationParameters *parameters)
         fclose(file);
         return 0;
     }
-    if (parameters->n_sweeps == 0) {
+    if (parameters->n_therm < 0) {
+        fprintf(stderr, "Errore: n_therm non puo' essere negativo.\n");
+        fclose(file);
+        return 0;
+    }
+    if (parameters->n_sweeps <= 0) {
         fprintf(stderr, "Errore: n_sweeps deve essere maggiore di zero.\n");
         fclose(file);
         return 0;
     }
-    if (parameters->measure_every == 0) {
+    if (parameters->measure_every <= 0) {
         fprintf(stderr, "Errore: measure_every deve essere maggiore di zero.\n");
+        fclose(file);
+        return 0;
+    }
+    if (parameters->seed < 0) {
+        fprintf(stderr, "Errore: seed non puo' essere negativo.\n");
         fclose(file);
         return 0;
     }

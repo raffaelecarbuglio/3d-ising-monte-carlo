@@ -20,10 +20,10 @@ void ising_fill_ordered(IsingLattice *lattice);
 void ising_fill_random(IsingLattice *lattice, Pcg32 *rng);
 int64_t ising_total_energy(const IsingLattice *lattice);
 int64_t ising_total_magnetization(const IsingLattice *lattice);
-uint64_t ising_metropolis_sweep(IsingLattice *lattice, double beta, Pcg32 *rng);
+int ising_metropolis_sweep(IsingLattice *lattice, double beta, Pcg32 *rng);
 int ising_save_configuration(const char *filename, const IsingLattice *lattice,
-                             uint64_t production_sweeps);
+                             int production_sweeps);
 int ising_load_configuration(const char *filename, IsingLattice *lattice,
-                             uint64_t *production_sweeps);
+                             int *production_sweeps);
 
 #endif

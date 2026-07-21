@@ -1,8 +1,6 @@
 #ifndef INPUT_H
 #define INPUT_H
 
-#include <stdint.h>
-
 #define INPUT_PATH_SIZE 512
 
 typedef enum {
@@ -14,10 +12,10 @@ typedef enum {
 typedef struct {
     int L;
     double beta;
-    uint64_t n_therm;
-    uint64_t n_sweeps;
-    uint64_t measure_every;
-    uint64_t seed;
+    int n_therm;
+    int n_sweeps;
+    int measure_every;
+    int seed;
     StartMode start;
     char config_file[INPUT_PATH_SIZE];
     char data_file[INPUT_PATH_SIZE];

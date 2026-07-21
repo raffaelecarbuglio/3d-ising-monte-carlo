@@ -1,5 +1,3 @@
-#include <errno.h>
-#include <inttypes.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,7 +5,7 @@
 #include "ising.h"
 #include "rng.h"
 
-static FILE *open_data_file(const SimulationParameters *p, uint64_t initial_sweep)
+static FILE *open_data_file(const SimulationParameters *p, int initial_sweep)
 {
     FILE *file;
 
@@ -20,9 +18,9 @@ static FILE *open_data_file(const SimulationParameters *p, uint64_t initial_swee
         }
         if (fprintf(file,
                     "#\n"
-                    "# restart: initial_sweep=%" PRIu64 " beta=%.17g "
-                    "seed=%" PRIu64 " n_therm=%" PRIu64 " "
-                    "n_sweeps=%" PRIu64 " measure_every=%" PRIu64 "\n"
+                    "# restart: initial_sweep=%d beta=%.17g "
+                    "seed=%d n_therm=%d "
+                    "n_sweeps=%d measure_every=%d\n"
                     "# config_file=%s\n",
                     initial_sweep, p->beta, p->seed, p->n_therm,
                     p->n_sweeps, p->measure_every, p->config_file) < 0) {
@@ -34,25 +32,21 @@ static FILE *open_data_file(const SimulationParameters *p, uint64_t initial_swee
 
     file = fopen(p->data_file, "wx");
     if (file == NULL) {
-        if (errno == EEXIST) {
-            fprintf(stderr,
-                    "Errore: il file dati '%s' esiste gia'; non verra' sovrascritto.\n",
-                    p->data_file);
-        } else {
-            fprintf(stderr, "Errore: impossibile creare il file dati '%s'.\n",
-                    p->data_file);
-        }
+        fprintf(stderr,
+                "Errore: impossibile creare il file dati '%s'; "
+                "un file esistente non viene sovrascritto.\n",
+                p->data_file);
         return NULL;
     }
     if (fprintf(file,
                 "# Ising 3D Metropolis\n"
                 "# L = %d\n"
                 "# beta = %.17g\n"
-                "# seed = %" PRIu64 "\n"
+                "# seed = %d\n"
                 "# start = %s\n"
-                "# n_therm = %" PRIu64 "\n"
-                "# n_sweeps = %" PRIu64 "\n"
-                "# measure_every = %" PRIu64 "\n"
+                "# n_therm = %d\n"
+                "# n_sweeps = %d\n"
+                "# measure_every = %d\n"
                 "# config_file = %s\n"
                 "# columns: sweep energy_per_spin magnetization_per_spin "
                 "abs_magnetization_per_spin acceptance\n",
@@ -66,7 +60,7 @@ static FILE *open_data_file(const SimulationParameters *p, uint64_t initial_swee
 }
 
 static int write_measurement(FILE *file, const IsingLattice *lattice,
-                             uint64_t sweep, uint64_t accepted, uint64_t attempts)
+                             int sweep, int accepted, int attempts)
 {
     int64_t energy = ising_total_energy(lattice);
     int64_t magnetization = ising_total_magnetization(lattice);
@@ -74,7 +68,7 @@ static int write_measurement(FILE *file, const IsingLattice *lattice,
     double m = (double)magnetization / n;
     double abs_m = fabs(m);
 
-    if (fprintf(file, "%" PRIu64 " %.12g %.12g %.12g %.12g\n",
+    if (fprintf(file, "%d %.12g %.12g %.12g %.12g\n",
                 sweep, (double)energy / n, m, abs_m,
                 (double)accepted / (double)attempts) < 0) {
         return 0;
@@ -87,10 +81,10 @@ static int run_simulation(const SimulationParameters *p)
     IsingLattice lattice;
     Pcg32 rng;
     FILE *data;
-    uint64_t previous_sweeps = 0;
-    uint64_t accepted = 0;
-    uint64_t attempts = 0;
-    uint64_t sweep;
+    int previous_sweeps = 0;
+    int accepted = 0;
+    int attempts = 0;
+    int sweep;
     int ok = 1;
 
     /* 1. Creazione del reticolo. */
@@ -120,7 +114,7 @@ static int run_simulation(const SimulationParameters *p)
         return 0;
     }
 
-    printf("Reticolo %d x %d x %d, start=%s, seed=%" PRIu64 "\n",
+    printf("Reticolo %d x %d x %d, start=%s, seed=%d\n",
            p->L, p->L, p->L, start_mode_name(p->start), p->seed);
 
     /* 5. Termalizzazione: questi sweep non producono misure. */
@@ -131,7 +125,7 @@ static int run_simulation(const SimulationParameters *p)
     /* 6. Produzione e scrittura periodica delle misure. */
     for (sweep = 1; sweep <= p->n_sweeps; sweep++) {
         accepted += ising_metropolis_sweep(&lattice, p->beta, &rng);
-        attempts += (uint64_t)lattice.n_spins;
+        attempts += (int)lattice.n_spins;
 
         if (sweep % p->measure_every == 0) {
             if (!write_measurement(data, &lattice, previous_sweeps + sweep,
@@ -160,7 +154,7 @@ static int run_simulation(const SimulationParameters *p)
     }
 
     if (ok) {
-        printf("Completati %" PRIu64 " sweep; totale salvato: %" PRIu64 ".\n",
+        printf("Completati %d sweep; totale salvato: %d.\n",
                p->n_sweeps, previous_sweeps + p->n_sweeps);
         printf("Configurazione finale: %s\n", p->config_file);
     }
