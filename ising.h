@@ -5,13 +5,15 @@
 #include <stdint.h>
 #include "rng.h"
 
+#define ISING_MAX_L 512
+
 typedef struct {
     int L;
     size_t n_spins;
     int *spins;
 } IsingLattice;
 
-/* L deve essere almeno 2. */
+/* L deve essere compreso tra 2 e ISING_MAX_L. */
 int ising_create(IsingLattice *lattice, int L);
 void ising_destroy(IsingLattice *lattice);
 void ising_fill_ordered(IsingLattice *lattice);

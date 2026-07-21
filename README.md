@@ -121,10 +121,8 @@ Contiene `L`, il numero totale di sweep di produzione completati e tutti gli
 spin. Durante il caricamento il programma controlla che `L` coincida e che ogni
 spin sia `+1` o `-1`.
 
-Per non cancellare prematuramente una configurazione precedente, il nuovo
-contenuto viene scritto e chiuso in `config_file.tmp`. Solo dopo il completamento
-della scrittura, `rename` sostituisce il file definitivo. In caso di errore il
-temporaneo viene rimosso.
+Il contenuto viene scritto direttamente nel percorso indicato da `config_file`.
+Il programma segnala eventuali errori di apertura, scrittura o chiusura del file.
 
 I percorsi sono relativi alla directory dalla quale si avvia il programma. Il
 progetto e' seriale e non usa librerie esterne.

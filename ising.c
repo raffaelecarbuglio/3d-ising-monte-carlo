@@ -1,5 +1,4 @@
 #include "ising.h"
-#include "input.h"
 #include <inttypes.h>
 #include <math.h>
 #include <stdio.h>
@@ -19,24 +18,16 @@ static int wrap_neighbor_coordinate(int coordinate, int L)
 
 int ising_create(IsingLattice *lattice, int L)
 {
-    size_t side;
-
     if (L < 2) {
         fprintf(stderr, "Errore: L deve essere almeno 2.\n");
         return 0;
     }
-
-    side = (size_t)L;
-    if (side > SIZE_MAX / side || side * side > SIZE_MAX / side) {
-        fprintf(stderr, "Errore: il reticolo e' troppo grande.\n");
+    if (L > ISING_MAX_L) {
+        fprintf(stderr, "Errore: L non puo' superare %d.\n", ISING_MAX_L);
         return 0;
     }
 
-    lattice->n_spins = side * side * side;
-    if (lattice->n_spins > SIZE_MAX / sizeof(*lattice->spins)) {
-        fprintf(stderr, "Errore: il reticolo e' troppo grande per questa versione.\n");
-        return 0;
-    }
+    lattice->n_spins = (size_t)L * (size_t)L * (size_t)L;
 
     lattice->spins = malloc(lattice->n_spins * sizeof(*lattice->spins));
     if (lattice->spins == NULL) {
@@ -172,33 +163,20 @@ uint64_t ising_metropolis_sweep(IsingLattice *lattice, double beta, Pcg32 *rng)
 int ising_save_configuration(const char *filename, const IsingLattice *lattice,
                              uint64_t production_sweeps)
 {
-    char temporary_filename[INPUT_PATH_SIZE + 4];
     FILE *file;
     size_t i;
-    int name_length;
     int ok = 1;
 
-    name_length = snprintf(temporary_filename, sizeof(temporary_filename),
-                           "%s.tmp", filename);
-    if (name_length < 0 || (size_t)name_length >= sizeof(temporary_filename)) {
-        fprintf(stderr, "Errore: nome della configurazione troppo lungo.\n");
-        return 0;
-    }
-
-    /* Il file definitivo resta intatto finche' il temporaneo non e' completo. */
-    file = fopen(temporary_filename, "w");
+    file = fopen(filename, "w");
     if (file == NULL) {
         fprintf(stderr, "Errore: impossibile scrivere la configurazione '%s'.\n", filename);
         return 0;
     }
 
-    if (fprintf(file, "L %d\nproduction_sweeps %" PRIu64 "\nspins\n",
-                lattice->L, production_sweeps) < 0) {
-        fprintf(stderr, "Errore durante la scrittura di '%s'.\n", filename);
-        ok = 0;
-    }
+    fprintf(file, "L %d\nproduction_sweeps %" PRIu64 "\nspins\n",
+            lattice->L, production_sweeps);
 
-    for (i = 0; ok && i < lattice->n_spins; i++) {
+    for (i = 0; i < lattice->n_spins; i++) {
         char separator;
 
         if ((i + 1) % (size_t)lattice->L == 0) {
@@ -207,10 +185,12 @@ int ising_save_configuration(const char *filename, const IsingLattice *lattice,
             separator = ' ';
         }
 
-        if (fprintf(file, "%2d%c", lattice->spins[i], separator) < 0) {
-            fprintf(stderr, "Errore durante la scrittura di '%s'.\n", filename);
-            ok = 0;
-        }
+        fprintf(file, "%2d%c", lattice->spins[i], separator);
+    }
+
+    if (ferror(file)) {
+        fprintf(stderr, "Errore durante la scrittura di '%s'.\n", filename);
+        ok = 0;
     }
 
     if (fclose(file) != 0) {
@@ -218,18 +198,7 @@ int ising_save_configuration(const char *filename, const IsingLattice *lattice,
         ok = 0;
     }
 
-    if (!ok) {
-        remove(temporary_filename);
-        return 0;
-    }
-
-    if (rename(temporary_filename, filename) != 0) {
-        fprintf(stderr, "Errore durante la sostituzione di '%s'.\n", filename);
-        remove(temporary_filename);
-        return 0;
-    }
-
-    return 1;
+    return ok;
 }
 
 int ising_load_configuration(const char *filename, IsingLattice *lattice,

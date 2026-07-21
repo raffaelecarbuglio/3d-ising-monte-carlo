@@ -13,7 +13,7 @@ test: ising tests
 	./tests
 main.o: main.c input.h ising.h rng.h
 input.o: input.c input.h
-ising.o: ising.c ising.h input.h rng.h
+ising.o: ising.c ising.h rng.h
 rng.o: rng.c rng.h
 tests.o: tests.c ising.h rng.h
 clean:

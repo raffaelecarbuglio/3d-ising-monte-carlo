@@ -42,17 +42,6 @@ static int same_spins(const IsingLattice *a, const IsingLattice *b)
     return 1;
 }
 
-static int file_exists(const char *filename)
-{
-    FILE *file = fopen(filename, "r");
-
-    if (file == NULL) {
-        return 0;
-    }
-    fclose(file);
-    return 1;
-}
-
 static int count_numeric_lines(const char *filename)
 {
     FILE *file;
@@ -210,8 +199,6 @@ static void test_save_load(void)
 
     check(ising_save_configuration("test_config.tmp", &original, 17),
           "salvataggio configurazione");
-    check(!file_exists("test_config.tmp.tmp"),
-          "il salvataggio non lascia il file temporaneo");
 
     load_ok = ising_load_configuration("test_config.tmp", &loaded,
                                        &saved_sweeps);
@@ -268,8 +255,6 @@ static void test_restart(void)
           "restart conserva e aggiunge le misure");
     check(last_sweep("test_data.tmp") == 8,
           "restart continua la numerazione degli sweep");
-    check(!file_exists("test_restart_config.tmp.tmp"),
-          "restart non lascia il file temporaneo");
 
     remove("test_first_input.tmp");
     remove("test_restart_input.tmp");
