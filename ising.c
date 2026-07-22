@@ -26,7 +26,7 @@ int ising_create(IsingLattice *lattice, int L)
         return 0;
     }
 
-    lattice->n_spins = (size_t)L * (size_t)L * (size_t)L;
+    lattice->n_spins = L * L * L;
 
     lattice->spins = malloc(lattice->n_spins * sizeof(*lattice->spins));
     if (lattice->spins == NULL) {
@@ -46,7 +46,7 @@ void ising_destroy(IsingLattice *lattice)
 
 void ising_fill_ordered(IsingLattice *lattice)
 {
-    size_t i;
+    int i;
 
     for (i = 0; i < lattice->n_spins; i++) {
         lattice->spins[i] = 1;
@@ -55,7 +55,7 @@ void ising_fill_ordered(IsingLattice *lattice)
 
 void ising_fill_random(IsingLattice *lattice, Pcg32 *rng)
 {
-    size_t i;
+    int i;
 
     for (i = 0; i < lattice->n_spins; i++) {
         if (pcg32_bit(rng) == 0) {
@@ -66,16 +66,14 @@ void ising_fill_random(IsingLattice *lattice, Pcg32 *rng)
     }
 }
 
-static size_t ising_index(const IsingLattice *lattice, int x, int y, int z)
+static int ising_index(const IsingLattice *lattice, int x, int y, int z)
 {
-    size_t L = (size_t)lattice->L;
-
     /* x varia piu' rapidamente nella disposizione lineare del reticolo. */
-    return ((size_t)z * L + (size_t)y) * L + (size_t)x;
+    return (z * lattice->L + y) * lattice->L + x;
 }
 
-static size_t ising_index_periodic(const IsingLattice *lattice,
-                                   int x, int y, int z)
+static int ising_index_periodic(const IsingLattice *lattice,
+                                int x, int y, int z)
 {
     int wx = wrap_neighbor_coordinate(x, lattice->L);
     int wy = wrap_neighbor_coordinate(y, lattice->L);
@@ -95,9 +93,9 @@ static int ising_neighbor_sum(const IsingLattice *lattice, int x, int y, int z)
          + lattice->spins[ising_index_periodic(lattice, x, y, z + 1)];
 }
 
-int64_t ising_total_energy(const IsingLattice *lattice)
+int ising_total_energy(const IsingLattice *lattice)
 {
-    int64_t energy = 0;
+    int energy = 0;
     int x;
     int y;
     int z;
@@ -119,10 +117,10 @@ int64_t ising_total_energy(const IsingLattice *lattice)
     return energy;
 }
 
-int64_t ising_total_magnetization(const IsingLattice *lattice)
+int ising_total_magnetization(const IsingLattice *lattice)
 {
-    int64_t magnetization = 0;
-    size_t i;
+    int magnetization = 0;
+    int i;
 
     for (i = 0; i < lattice->n_spins; i++) {
         magnetization += lattice->spins[i];
@@ -140,7 +138,7 @@ int ising_metropolis_sweep(IsingLattice *lattice, double beta, Pcg32 *rng)
     for (z = 0; z < lattice->L; z++) {
         for (y = 0; y < lattice->L; y++) {
             for (x = 0; x < lattice->L; x++) {
-                size_t index = ising_index(lattice, x, y, z);
+                int index = ising_index(lattice, x, y, z);
                 int delta_energy;
 
                 /* Per un flip, delta E = 2 s_i moltiplicato per i sei vicini. */
@@ -163,7 +161,7 @@ int ising_save_configuration(const char *filename, const IsingLattice *lattice,
                              int production_sweeps)
 {
     FILE *file;
-    size_t i;
+    int i;
     int ok = 1;
 
     file = fopen(filename, "w");
@@ -178,7 +176,7 @@ int ising_save_configuration(const char *filename, const IsingLattice *lattice,
     for (i = 0; i < lattice->n_spins; i++) {
         char separator;
 
-        if ((i + 1) % (size_t)lattice->L == 0) {
+        if ((i + 1) % lattice->L == 0) {
             separator = '\n';
         } else {
             separator = ' ';
@@ -207,7 +205,7 @@ int ising_load_configuration(const char *filename, IsingLattice *lattice,
     char label[64];
     int file_L;
     int saved_sweeps;
-    size_t i;
+    int i;
 
     file = fopen(filename, "r");
     if (file == NULL) {
@@ -241,7 +239,7 @@ int ising_load_configuration(const char *filename, IsingLattice *lattice,
     for (i = 0; i < lattice->n_spins; i++) {
         if (fscanf(file, "%d", &lattice->spins[i]) != 1 ||
             (lattice->spins[i] != -1 && lattice->spins[i] != 1)) {
-            fprintf(stderr, "Errore: spin %zu non valido in '%s'.\n", i, filename);
+            fprintf(stderr, "Errore: spin %d non valido in '%s'.\n", i, filename);
             fclose(file);
             return 0;
         }

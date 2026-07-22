@@ -62,8 +62,8 @@ static FILE *open_data_file(const SimulationParameters *p, int initial_sweep)
 static int write_measurement(FILE *file, const IsingLattice *lattice,
                              int sweep, int accepted, int attempts)
 {
-    int64_t energy = ising_total_energy(lattice);
-    int64_t magnetization = ising_total_magnetization(lattice);
+    int energy = ising_total_energy(lattice);
+    int magnetization = ising_total_magnetization(lattice);
     double n = (double)lattice->n_spins;
     double m = (double)magnetization / n;
     double abs_m = fabs(m);
@@ -125,7 +125,7 @@ static int run_simulation(const SimulationParameters *p)
     /* 6. Produzione e scrittura periodica delle misure. */
     for (sweep = 1; sweep <= p->n_sweeps; sweep++) {
         accepted += ising_metropolis_sweep(&lattice, p->beta, &rng);
-        attempts += (int)lattice.n_spins;
+        attempts += lattice.n_spins;
 
         if (sweep % p->measure_every == 0) {
             if (!write_measurement(data, &lattice, previous_sweeps + sweep,

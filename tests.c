@@ -20,7 +20,7 @@ static void check(int condition, const char *name)
 
 static int valid_spins(const IsingLattice *lattice)
 {
-    size_t i;
+    int i;
 
     for (i = 0; i < lattice->n_spins; i++) {
         if (lattice->spins[i] != -1 && lattice->spins[i] != 1) {
@@ -118,7 +118,7 @@ static void test_lattice(void)
 {
     IsingLattice lattice;
     Pcg32 rng;
-    size_t i;
+    int i;
     int created;
 
     created = ising_create(&lattice, 3);
@@ -143,7 +143,7 @@ static void test_lattice(void)
 
     pcg32_seed(&rng, 123);
     ising_fill_ordered(&lattice);
-    check(ising_metropolis_sweep(&lattice, 0.0, &rng) == (int)lattice.n_spins,
+    check(ising_metropolis_sweep(&lattice, 0.0, &rng) == lattice.n_spins,
           "a beta=0 ogni sito e' aggiornato una volta");
 
     for (i = 0; i < lattice.n_spins; i++) {
