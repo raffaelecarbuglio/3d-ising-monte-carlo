@@ -5,11 +5,10 @@ Ogni sito contiene uno spin `+1` o `-1` e interagisce con i suoi sei primi
 vicini. Le condizioni al bordo sono periodiche e la costante di accoppiamento
 e' `J = 1`.
 
-Gli spin sono aggiornati con l'algoritmo Metropolis locale. Il reticolo e'
-memorizzato con `x` come coordinata piu' rapida; ogni sweep percorre quindi
-prima `z`, poi `y` e infine `x` nel ciclo piu' interno. Ogni sito viene visitato
-una volta e un flip accettato modifica subito il reticolo. PCG32 fornisce i
-numeri casuali usati dal criterio di accettazione.
+Gli spin possono essere aggiornati con l'algoritmo Metropolis locale oppure con
+l'algoritmo di cluster Wolff. La scelta resta fissa per tutta l'esecuzione.
+Il reticolo e' memorizzato con `x` come coordinata piu' rapida. PCG32 fornisce
+i numeri casuali usati dai due algoritmi.
 
 ## Compilazione e test
 
@@ -57,6 +56,7 @@ Per `start = ordered` o `start = random` il formato e':
     measure_every = 5
     seed = 12345
     start = ordered
+    algorithm = metropolis
     config_file = example_config.dat
     data_file = example_data.dat
 
@@ -69,6 +69,7 @@ Per un restart si usa lo stesso campo `config_file`:
     measure_every = 5
     seed = 67890
     start = restart
+    algorithm = metropolis
     config_file = example_config.dat
     data_file = example_data.dat
 
@@ -81,6 +82,7 @@ Significato dei parametri:
 - `measure_every`: intervallo tra le misure, maggiore di zero.
 - `seed`: intero non negativo usato per inizializzare PCG32.
 - `start`: `ordered`, `random` oppure `restart`.
+- `algorithm`: `metropolis` oppure `wolff`; resta fisso durante l'esecuzione.
 - `config_file`: configurazione da salvare; durante un restart viene prima
   caricata e poi sostituita con il checkpoint aggiornato.
 - `data_file`: file testuale delle misure.
@@ -89,14 +91,20 @@ Significato dei parametri:
 
 Una nuova simulazione crea un'intestazione commentata contenente modello, `L`,
 `beta`, seed, modalita' iniziale, numeri di sweep, intervallo di misura,
-`config_file` e nomi delle colonne. Le righe numeriche hanno sempre questa
-forma:
+`config_file` e nomi delle colonne. Con Metropolis le righe numeriche hanno
+questa forma:
 
     sweep energy_per_spin magnetization_per_spin abs_magnetization_per_spin acceptance
 
 `sweep` e' il numero complessivo di sweep di produzione. `acceptance` e' la
 frazione dei tentativi accettati dall'ultima misura. Energia e magnetizzazione
 sono divise per `L^3`; ogni legame contribuisce una volta all'energia.
+
+Con Wolff ogni aggiornamento costruisce e inverte un cluster e viene contato
+come uno sweep. La quinta colonna si chiama `cluster_fraction` e contiene la
+dimensione media dei cluster dall'ultima misura, divisa per il numero di spin:
+
+    sweep energy_per_spin magnetization_per_spin abs_magnetization_per_spin cluster_fraction
 
 Un restart aggiunge soltanto un breve blocco commentato con lo sweep iniziale,
 i parametri del nuovo segmento e `config_file`. Non ripete

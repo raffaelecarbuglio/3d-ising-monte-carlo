@@ -184,6 +184,33 @@ static void test_reproducibility(void)
     ising_destroy(&b);
 }
 
+static void test_wolff(void)
+{
+    IsingLattice lattice;
+    Pcg32 rng;
+    int cluster[27];
+    int in_cluster[27] = {0};
+
+    ising_create(&lattice, 3);
+    pcg32_seed(&rng, 321);
+
+    ising_fill_ordered(&lattice);
+    check(ising_wolff_update(&lattice, 0.0, &rng,
+                             cluster, in_cluster) == 1,
+          "Wolff con probabilita' zero: cluster di uno spin");
+    check(ising_total_magnetization(&lattice) == 25,
+          "Wolff inverte il cluster costruito");
+
+    ising_fill_ordered(&lattice);
+    check(ising_wolff_update(&lattice, 1.0, &rng,
+                             cluster, in_cluster) == lattice.n_spins,
+          "Wolff con probabilita' uno: cluster completo");
+    check(ising_total_magnetization(&lattice) == -lattice.n_spins,
+          "Wolff inverte il reticolo completamente connesso");
+
+    ising_destroy(&lattice);
+}
+
 static void test_save_load(void)
 {
     IsingLattice original;
@@ -223,6 +250,7 @@ static void test_restart(void)
         "measure_every = 2\n"
         "seed = 101\n"
         "start = ordered\n"
+        "algorithm = metropolis\n"
         "config_file = test_restart_config.tmp\n"
         "data_file = test_data.tmp\n";
     const char *restart =
@@ -233,6 +261,7 @@ static void test_restart(void)
         "measure_every = 2\n"
         "seed = 202\n"
         "start = restart\n"
+        "algorithm = metropolis\n"
         "config_file = test_restart_config.tmp\n"
         "data_file = test_data.tmp\n";
     int first_status;
@@ -263,12 +292,45 @@ static void test_restart(void)
     remove("test_program_output.tmp");
 }
 
+static void test_wolff_simulation(void)
+{
+    const char *input =
+        "L = 3\n"
+        "beta = 0.2\n"
+        "n_therm = 1\n"
+        "n_sweeps = 4\n"
+        "measure_every = 2\n"
+        "seed = 303\n"
+        "start = ordered\n"
+        "algorithm = wolff\n"
+        "config_file = test_wolff_config.tmp\n"
+        "data_file = test_wolff_data.tmp\n";
+    int status;
+
+    remove("test_wolff_data.tmp");
+    write_text("test_wolff_input.tmp", input);
+    status = system("./ising test_wolff_input.tmp > test_wolff_output.tmp");
+
+    check(status == 0, "simulazione Wolff completa");
+    check(count_numeric_lines("test_wolff_data.tmp") == 2,
+          "Wolff scrive le misure richieste");
+    check(last_sweep("test_wolff_data.tmp") == 4,
+          "Wolff mantiene la numerazione degli aggiornamenti");
+
+    remove("test_wolff_input.tmp");
+    remove("test_wolff_config.tmp");
+    remove("test_wolff_data.tmp");
+    remove("test_wolff_output.tmp");
+}
+
 int main(void)
 {
     test_lattice();
     test_reproducibility();
+    test_wolff();
     test_save_load();
     test_restart();
+    test_wolff_simulation();
 
     printf("\nTest eseguiti: %d, falliti: %d\n", tests_run, tests_failed);
     if (tests_failed != 0) {

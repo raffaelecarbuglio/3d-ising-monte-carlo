@@ -8,6 +8,13 @@
 static FILE *open_data_file(const SimulationParameters *p, int initial_sweep)
 {
     FILE *file;
+    const char *last_column;
+
+    if (p->algorithm == ALGORITHM_METROPOLIS) {
+        last_column = "acceptance";
+    } else {
+        last_column = "cluster_fraction";
+    }
 
     if (p->start == START_RESTART) {
         /* Un restart aggiunge un segmento breve al file esistente o ne crea uno. */
@@ -20,10 +27,11 @@ static FILE *open_data_file(const SimulationParameters *p, int initial_sweep)
                     "#\n"
                     "# restart: initial_sweep=%d beta=%.17g "
                     "seed=%d n_therm=%d "
-                    "n_sweeps=%d measure_every=%d\n"
+                    "n_sweeps=%d measure_every=%d algorithm=%s\n"
                     "# config_file=%s\n",
                     initial_sweep, p->beta, p->seed, p->n_therm,
-                    p->n_sweeps, p->measure_every, p->config_file) < 0) {
+                    p->n_sweeps, p->measure_every,
+                    algorithm_name(p->algorithm), p->config_file) < 0) {
             fclose(file);
             return NULL;
         }
@@ -39,20 +47,22 @@ static FILE *open_data_file(const SimulationParameters *p, int initial_sweep)
         return NULL;
     }
     if (fprintf(file,
-                "# Ising 3D Metropolis\n"
+                "# Ising 3D\n"
                 "# L = %d\n"
                 "# beta = %.17g\n"
                 "# seed = %d\n"
                 "# start = %s\n"
+                "# algorithm = %s\n"
                 "# n_therm = %d\n"
                 "# n_sweeps = %d\n"
                 "# measure_every = %d\n"
                 "# config_file = %s\n"
                 "# columns: sweep energy_per_spin magnetization_per_spin "
-                "abs_magnetization_per_spin acceptance\n",
+                "abs_magnetization_per_spin %s\n",
                 p->L, p->beta, p->seed, start_mode_name(p->start),
+                algorithm_name(p->algorithm),
                 p->n_therm, p->n_sweeps, p->measure_every,
-                p->config_file) < 0) {
+                p->config_file, last_column) < 0) {
         fclose(file);
         return NULL;
     }
@@ -60,7 +70,7 @@ static FILE *open_data_file(const SimulationParameters *p, int initial_sweep)
 }
 
 static int write_measurement(FILE *file, const IsingLattice *lattice,
-                             int sweep, int accepted, int attempts)
+                             int sweep, double update_measure)
 {
     int energy = ising_total_energy(lattice);
     int magnetization = ising_total_magnetization(lattice);
@@ -69,8 +79,7 @@ static int write_measurement(FILE *file, const IsingLattice *lattice,
     double abs_m = fabs(m);
 
     if (fprintf(file, "%d %.12g %.12g %.12g %.12g\n",
-                sweep, (double)energy / n, m, abs_m,
-                (double)accepted / (double)attempts) < 0) {
+                sweep, (double)energy / n, m, abs_m, update_measure) < 0) {
         return 0;
     }
     return 1;
@@ -81,9 +90,12 @@ static int run_simulation(const SimulationParameters *p)
     IsingLattice lattice;
     Pcg32 rng;
     FILE *data;
+    int *cluster = NULL;
+    int *in_cluster = NULL;
+    double wolff_probability = 0.0;
     int previous_sweeps = 0;
-    int accepted = 0;
-    int attempts = 0;
+    int changed_spins = 0;
+    int update_count = 0;
     int sweep;
     int ok = 1;
 
@@ -107,35 +119,70 @@ static int run_simulation(const SimulationParameters *p)
         }
     }
 
+    if (p->algorithm == ALGORITHM_WOLFF) {
+        cluster = malloc(lattice.n_spins * sizeof(*cluster));
+        in_cluster = calloc(lattice.n_spins, sizeof(*in_cluster));
+        if (cluster == NULL || in_cluster == NULL) {
+            fprintf(stderr, "Errore: memoria insufficiente per il cluster Wolff.\n");
+            free(cluster);
+            free(in_cluster);
+            ising_destroy(&lattice);
+            return 0;
+        }
+        wolff_probability = 1.0 - exp(-2.0 * p->beta);
+    }
+
     /* 4. Apertura del file delle misure. */
     data = open_data_file(p, previous_sweeps);
     if (data == NULL) {
+        free(cluster);
+        free(in_cluster);
         ising_destroy(&lattice);
         return 0;
     }
 
-    printf("Reticolo %d x %d x %d, start=%s, seed=%d\n",
-           p->L, p->L, p->L, start_mode_name(p->start), p->seed);
+    printf("Reticolo %d x %d x %d, start=%s, algorithm=%s, seed=%d\n",
+           p->L, p->L, p->L, start_mode_name(p->start),
+           algorithm_name(p->algorithm), p->seed);
 
     /* 5. Termalizzazione: questi sweep non producono misure. */
     for (sweep = 0; sweep < p->n_therm; sweep++) {
-        ising_metropolis_sweep(&lattice, p->beta, &rng);
+        if (p->algorithm == ALGORITHM_METROPOLIS) {
+            ising_metropolis_sweep(&lattice, p->beta, &rng);
+        } else {
+            ising_wolff_update(&lattice, wolff_probability, &rng,
+                               cluster, in_cluster);
+        }
     }
 
     /* 6. Produzione e scrittura periodica delle misure. */
     for (sweep = 1; sweep <= p->n_sweeps; sweep++) {
-        accepted += ising_metropolis_sweep(&lattice, p->beta, &rng);
-        attempts += lattice.n_spins;
+        if (p->algorithm == ALGORITHM_METROPOLIS) {
+            changed_spins += ising_metropolis_sweep(&lattice, p->beta, &rng);
+            update_count += lattice.n_spins;
+        } else {
+            changed_spins += ising_wolff_update(&lattice, wolff_probability,
+                                                &rng, cluster, in_cluster);
+            update_count++;
+        }
 
         if (sweep % p->measure_every == 0) {
+            double update_measure;
+
+            if (p->algorithm == ALGORITHM_METROPOLIS) {
+                update_measure = (double)changed_spins / (double)update_count;
+            } else {
+                update_measure = (double)changed_spins
+                               / ((double)update_count * lattice.n_spins);
+            }
             if (!write_measurement(data, &lattice, previous_sweeps + sweep,
-                                   accepted, attempts)) {
+                                   update_measure)) {
                 fprintf(stderr, "Errore durante la scrittura delle misure.\n");
                 ok = 0;
                 break;
             }
-            accepted = 0;
-            attempts = 0;
+            changed_spins = 0;
+            update_count = 0;
         }
     }
 
@@ -160,6 +207,8 @@ static int run_simulation(const SimulationParameters *p)
     }
 
     /* 9. Liberazione della memoria del reticolo. */
+    free(cluster);
+    free(in_cluster);
     ising_destroy(&lattice);
     return ok;
 }

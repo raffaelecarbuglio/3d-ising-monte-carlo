@@ -6,6 +6,7 @@ int input_read(const char *filename, SimulationParameters *parameters)
 {
     FILE *file;
     char start[16];
+    char algorithm[16];
     int fields_read = 0;
 
     file = fopen(filename, "r");
@@ -22,9 +23,20 @@ int input_read(const char *filename, SimulationParameters *parameters)
                           &parameters->measure_every);
     fields_read += fscanf(file, "\nseed = %d", &parameters->seed);
     fields_read += fscanf(file, "\nstart = %15s", start);
+    fields_read += fscanf(file, "\nalgorithm = %15s", algorithm);
 
-    if (fields_read != 7) {
+    if (fields_read != 8) {
         fprintf(stderr, "Errore: formato del file di input non valido.\n");
+        fclose(file);
+        return 0;
+    }
+
+    if (strcmp(algorithm, "metropolis") == 0) {
+        parameters->algorithm = ALGORITHM_METROPOLIS;
+    } else if (strcmp(algorithm, "wolff") == 0) {
+        parameters->algorithm = ALGORITHM_WOLFF;
+    } else {
+        fprintf(stderr, "Errore: algorithm deve essere metropolis oppure wolff.\n");
         fclose(file);
         return 0;
     }
@@ -91,4 +103,12 @@ const char *start_mode_name(StartMode mode)
         return "random";
     }
     return "restart";
+}
+
+const char *algorithm_name(Algorithm algorithm)
+{
+    if (algorithm == ALGORITHM_METROPOLIS) {
+        return "metropolis";
+    }
+    return "wolff";
 }

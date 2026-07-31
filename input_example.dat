@@ -5,5 +5,6 @@ n_sweeps = 40
 measure_every = 5
 seed = 12345
 start = ordered
+algorithm = metropolis
 config_file = example_config.dat
 data_file = example_data.dat

@@ -163,6 +163,59 @@ int ising_metropolis_sweep(IsingLattice *lattice, double beta, Pcg32 *rng)
     return accepted;
 }
 
+int ising_wolff_update(IsingLattice *lattice, double probability, Pcg32 *rng,
+                       int *cluster, int *in_cluster)
+{
+    int first = 0;
+    int cluster_size = 1;
+    int initial_index;
+    int cluster_spin;
+    int i;
+
+    initial_index = (int)(pcg32_uniform(rng) * lattice->n_spins);
+    cluster_spin = lattice->spins[initial_index];
+    cluster[0] = initial_index;
+    in_cluster[initial_index] = 1;
+
+    while (first < cluster_size) {
+        int index = cluster[first];
+        int x = index % lattice->L;
+        int y = (index / lattice->L) % lattice->L;
+        int z = index / (lattice->L * lattice->L);
+        int neighbors[6];
+        int neighbor_number;
+
+        first++;
+        neighbors[0] = ising_index_periodic(lattice, x - 1, y, z);
+        neighbors[1] = ising_index_periodic(lattice, x + 1, y, z);
+        neighbors[2] = ising_index_periodic(lattice, x, y - 1, z);
+        neighbors[3] = ising_index_periodic(lattice, x, y + 1, z);
+        neighbors[4] = ising_index_periodic(lattice, x, y, z - 1);
+        neighbors[5] = ising_index_periodic(lattice, x, y, z + 1);
+
+        for (neighbor_number = 0; neighbor_number < 6; neighbor_number++) {
+            int neighbor = neighbors[neighbor_number];
+
+            if (!in_cluster[neighbor] &&
+                lattice->spins[neighbor] == cluster_spin &&
+                pcg32_uniform(rng) < probability) {
+                in_cluster[neighbor] = 1;
+                cluster[cluster_size] = neighbor;
+                cluster_size++;
+            }
+        }
+    }
+
+    for (i = 0; i < cluster_size; i++) {
+        int index = cluster[i];
+
+        lattice->spins[index] = -lattice->spins[index];
+        in_cluster[index] = 0;
+    }
+
+    return cluster_size;
+}
+
 int ising_save_configuration(const char *filename, const IsingLattice *lattice,
                              int production_sweeps)
 {
