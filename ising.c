@@ -130,10 +130,16 @@ int ising_total_magnetization(const IsingLattice *lattice)
 
 int ising_metropolis_sweep(IsingLattice *lattice, double beta, Pcg32 *rng)
 {
+    double acceptance_probability[4];
     int accepted = 0;
     int x;
     int y;
     int z;
+
+    /* I soli delta E positivi possibili sono 4, 8 e 12. */
+    acceptance_probability[1] = exp(-4.0 * beta);
+    acceptance_probability[2] = exp(-8.0 * beta);
+    acceptance_probability[3] = exp(-12.0 * beta);
 
     for (z = 0; z < lattice->L; z++) {
         for (y = 0; y < lattice->L; y++) {
@@ -147,7 +153,7 @@ int ising_metropolis_sweep(IsingLattice *lattice, double beta, Pcg32 *rng)
 
                 /* Metropolis: i flip favorevoli sono sempre accettati. */
                 if (delta_energy <= 0 ||
-                    pcg32_uniform(rng) < exp(-beta * delta_energy)) {
+                    pcg32_uniform(rng) < acceptance_probability[delta_energy / 4]) {
                     lattice->spins[index] = -lattice->spins[index];
                     accepted++;
                 }
