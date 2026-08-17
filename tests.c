@@ -59,12 +59,15 @@ static int count_numeric_lines(const char *filename)
         double magnetization;
         double abs_magnetization;
         double acceptance;
+        double g_zero;
+        double g_min;
 
         if (line[0] == '#') {
             continue;
         }
-        if (sscanf(line, "%llu %lf %lf %lf %lf", &sweep, &energy,
-                   &magnetization, &abs_magnetization, &acceptance) != 5) {
+        if (sscanf(line, "%llu %lf %lf %lf %lf %lf %lf", &sweep, &energy,
+                   &magnetization, &abs_magnetization, &acceptance,
+                   &g_zero, &g_min) != 7) {
             fclose(file);
             return -1;
         }
@@ -96,6 +99,36 @@ static unsigned long long last_sweep(const char *filename)
 
     fclose(file);
     return value;
+}
+
+static int first_structure_factors(const char *filename,
+                                   double *g_zero, double *g_min)
+{
+    FILE *file;
+    char line[512];
+    unsigned long long sweep;
+    double energy;
+    double magnetization;
+    double abs_magnetization;
+    double update_measure;
+
+    file = fopen(filename, "r");
+    if (file == NULL) {
+        return 0;
+    }
+
+    while (fgets(line, sizeof(line), file) != NULL) {
+        if (line[0] != '#' &&
+            sscanf(line, "%llu %lf %lf %lf %lf %lf %lf",
+                   &sweep, &energy, &magnetization, &abs_magnetization,
+                   &update_measure, g_zero, g_min) == 7) {
+            fclose(file);
+            return 1;
+        }
+    }
+
+    fclose(file);
+    return 0;
 }
 
 static int write_text(const char *filename, const char *contents)
@@ -296,7 +329,7 @@ static void test_wolff_simulation(void)
 {
     const char *input =
         "L = 3\n"
-        "beta = 0.2\n"
+        "beta = 100\n"
         "n_therm = 1\n"
         "n_sweeps = 4\n"
         "measure_every = 2\n"
@@ -306,6 +339,8 @@ static void test_wolff_simulation(void)
         "config_file = test_wolff_config.tmp\n"
         "data_file = test_wolff_data.tmp\n";
     int status;
+    double g_zero;
+    double g_min;
 
     remove("test_wolff_data.tmp");
     write_text("test_wolff_input.tmp", input);
@@ -316,6 +351,9 @@ static void test_wolff_simulation(void)
           "Wolff scrive le misure richieste");
     check(last_sweep("test_wolff_data.tmp") == 4,
           "Wolff mantiene la numerazione degli aggiornamenti");
+    check(first_structure_factors("test_wolff_data.tmp", &g_zero, &g_min) &&
+          g_zero == 27.0 && g_min < 1e-20,
+          "fattori di struttura corretti per il reticolo ordinato");
 
     remove("test_wolff_input.tmp");
     remove("test_wolff_config.tmp");

@@ -58,7 +58,7 @@ static FILE *open_data_file(const SimulationParameters *p, int initial_sweep)
                 "# measure_every = %d\n"
                 "# config_file = %s\n"
                 "# columns: sweep energy_per_spin magnetization_per_spin "
-                "abs_magnetization_per_spin %s\n",
+                "abs_magnetization_per_spin %s g_zero g_min\n",
                 p->L, p->beta, p->seed, start_mode_name(p->start),
                 algorithm_name(p->algorithm),
                 p->n_therm, p->n_sweeps, p->measure_every,
@@ -70,16 +70,53 @@ static FILE *open_data_file(const SimulationParameters *p, int initial_sweep)
 }
 
 static int write_measurement(FILE *file, const IsingLattice *lattice,
-                             int sweep, double update_measure)
+                             int sweep, double update_measure,
+                             const double *cos_table, const double *sin_table)
 {
     int energy = ising_total_energy(lattice);
-    int magnetization = ising_total_magnetization(lattice);
     double n = (double)lattice->n_spins;
-    double m = (double)magnetization / n;
-    double abs_m = fabs(m);
+    double magnetization = 0.0;
+    double real_x = 0.0;
+    double imaginary_x = 0.0;
+    double real_y = 0.0;
+    double imaginary_y = 0.0;
+    double real_z = 0.0;
+    double imaginary_z = 0.0;
+    double m;
+    double abs_m;
+    double g_zero;
+    double g_min;
+    int x;
+    int y;
+    int z;
 
-    if (fprintf(file, "%d %.12g %.12g %.12g %.12g\n",
-                sweep, (double)energy / n, m, abs_m, update_measure) < 0) {
+    for (z = 0; z < lattice->L; z++) {
+        for (y = 0; y < lattice->L; y++) {
+            for (x = 0; x < lattice->L; x++) {
+                int index = (z * lattice->L + y) * lattice->L + x;
+                int spin = lattice->spins[index];
+
+                magnetization += spin;
+                real_x += spin * cos_table[x];
+                imaginary_x += spin * sin_table[x];
+                real_y += spin * cos_table[y];
+                imaginary_y += spin * sin_table[y];
+                real_z += spin * cos_table[z];
+                imaginary_z += spin * sin_table[z];
+            }
+        }
+    }
+
+    m = magnetization / n;
+    abs_m = fabs(m);
+    g_zero = magnetization * magnetization / n;
+    g_min = (real_x * real_x + imaginary_x * imaginary_x
+           + real_y * real_y + imaginary_y * imaginary_y
+           + real_z * real_z + imaginary_z * imaginary_z) / (3.0 * n);
+
+    if (fprintf(file, "%d %.12g %.12g %.12g %.12g %.12g %.12g\n",
+                sweep, (double)energy / n, m, abs_m, update_measure,
+                g_zero, g_min) < 0) {
         return 0;
     }
     return 1;
@@ -93,10 +130,14 @@ static int run_simulation(const SimulationParameters *p)
     int *cluster = NULL;
     int *in_cluster = NULL;
     double wolff_probability = 0.0;
+    double cos_table[ISING_MAX_L];
+    double sin_table[ISING_MAX_L];
+    double minimum_momentum;
     int previous_sweeps = 0;
     int changed_spins = 0;
     int update_count = 0;
     int sweep;
+    int coordinate;
     int ok = 1;
 
     /* 1. Creazione del reticolo. */
@@ -106,6 +147,14 @@ static int run_simulation(const SimulationParameters *p)
 
     /* 2. Inizializzazione del generatore casuale. */
     pcg32_seed(&rng, p->seed);
+
+    minimum_momentum = 2.0 * acos(-1.0) / lattice.L;
+    for (coordinate = 0; coordinate < lattice.L; coordinate++) {
+        double angle = minimum_momentum * coordinate;
+
+        cos_table[coordinate] = cos(angle);
+        sin_table[coordinate] = sin(angle);
+    }
 
     /* 3. Preparazione iniziale oppure caricamento di un restart. */
     if (p->start == START_ORDERED) {
@@ -176,7 +225,7 @@ static int run_simulation(const SimulationParameters *p)
                                / ((double)update_count * lattice.n_spins);
             }
             if (!write_measurement(data, &lattice, previous_sweeps + sweep,
-                                   update_measure)) {
+                                   update_measure, cos_table, sin_table)) {
                 fprintf(stderr, "Errore durante la scrittura delle misure.\n");
                 ok = 0;
                 break;

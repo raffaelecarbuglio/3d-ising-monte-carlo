@@ -94,7 +94,7 @@ Una nuova simulazione crea un'intestazione commentata contenente modello, `L`,
 `config_file` e nomi delle colonne. Con Metropolis le righe numeriche hanno
 questa forma:
 
-    sweep energy_per_spin magnetization_per_spin abs_magnetization_per_spin acceptance
+    sweep energy_per_spin magnetization_per_spin abs_magnetization_per_spin acceptance g_zero g_min
 
 `sweep` e' il numero complessivo di sweep di produzione. `acceptance` e' la
 frazione dei tentativi accettati dall'ultima misura. Energia e magnetizzazione
@@ -104,7 +104,25 @@ Con Wolff ogni aggiornamento costruisce e inverte un cluster e viene contato
 come uno sweep. La quinta colonna si chiama `cluster_fraction` e contiene la
 dimensione media dei cluster dall'ultima misura, divisa per il numero di spin:
 
-    sweep energy_per_spin magnetization_per_spin abs_magnetization_per_spin cluster_fraction
+    sweep energy_per_spin magnetization_per_spin abs_magnetization_per_spin cluster_fraction g_zero g_min
+
+Le ultime due colonne sono gli stimatori della funzione di correlazione in
+spazio degli impulsi. Per ogni configurazione misurata il programma calcola
+
+    g_zero = M^2 / L^3
+
+e `g_min` al minimo impulso non nullo `2 pi / L`. Per ridurre il rumore,
+`g_min` e' la media sui tre impulsi equivalenti lungo `x`, `y` e `z`.
+
+La lunghezza di correlazione del secondo momento deve essere calcolata usando
+le medie sulle configurazioni:
+
+    xi = sqrt(mean(g_zero) / mean(g_min) - 1) / (2 sin(pi / L))
+
+Non bisogna calcolare `xi` separatamente per ogni riga. Per stimarne l'errore
+occorre dividere i dati in blocchi e ricalcolare il rapporto all'interno dei
+campioni jackknife. Se l'argomento della radice risulta negativo, la stima va
+segnalata come non valida e non sostituita artificialmente con zero.
 
 Un restart aggiunge soltanto un breve blocco commentato con lo sweep iniziale,
 i parametri del nuovo segmento e `config_file`. Non ripete
