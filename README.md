@@ -18,6 +18,10 @@ disponibili su Linux:
     make
     make test
 
+I test dell'analisi richiedono Python 3 e NumPy:
+
+    make test-analysis
+
 Per eliminare eseguibili, file oggetto e risultati degli esempi:
 
     make clean
@@ -127,11 +131,31 @@ segnalata come non valida e non sostituita artificialmente con zero.
 Un restart aggiunge soltanto un breve blocco commentato con lo sweep iniziale,
 i parametri del nuovo segmento e `config_file`. Non ripete
 l'intestazione completa o i nomi delle colonne. Le misure precedenti restano
-nel file e la numerazione prosegue. In Python si possono ignorare tutte le
-righe commentate, per esempio:
+nel file e la numerazione prosegue.
 
-    data = pandas.read_csv("example_data.dat", sep=r"\s+", comment="#",
-                           header=None)
+## Analisi Python
+
+Lo script `analyze.py` legge le sette colonne numeriche, ignora tutte le righe
+commentate e ricava `L` dall'intestazione. Si avvia indicando il numero di
+misure per blocco:
+
+    python3 analyze.py example_data.dat --block-size 100
+
+Lo script calcola le medie di energia, magnetizzazione, magnetizzazione
+assoluta, `g_zero` e `g_min`. La cumulante di Binder usa la convenzione
+
+    U = mean(m^4) / mean(m^2)^2
+
+La lunghezza `xi` usa il rapporto delle medie riportato sopra e `R_xi = xi/L`.
+Gli errori di energia, magnetizzazione assoluta, Binder, `xi` e `R_xi` sono
+stimati con un jackknife a blocchi. Binder e `xi` vengono ricalcolati da zero
+in ogni campione jackknife, perche' sono funzioni non lineari delle medie.
+
+Vengono usati soltanto blocchi contigui completi. Le eventuali misure finali
+che non formano un blocco completo sono escluse e il loro numero viene
+stampato. Servono almeno due blocchi completi. Se l'argomento della radice di
+`xi` e' negativo, lo script termina con un messaggio di errore senza alterare
+il risultato.
 
 ## File di configurazione
 
