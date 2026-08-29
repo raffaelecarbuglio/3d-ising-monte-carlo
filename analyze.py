@@ -111,6 +111,24 @@ def block_jackknife(data, lattice_size, block_size):
     used_data = data[:used_measurements]
     observables = calculate_observables(used_data, lattice_size)
 
+    blocks = used_data.reshape(number_of_blocks, block_size, 7)
+    block_energy_sums = np.sum(blocks[:, :, ENERGY], axis=1)
+    block_abs_magnetization_sums = np.sum(
+        blocks[:, :, ABS_MAGNETIZATION], axis=1
+    )
+    block_m2_sums = np.sum(blocks[:, :, MAGNETIZATION] ** 2, axis=1)
+    block_m4_sums = np.sum(blocks[:, :, MAGNETIZATION] ** 4, axis=1)
+    block_g_zero_sums = np.sum(blocks[:, :, G_ZERO], axis=1)
+    block_g_min_sums = np.sum(blocks[:, :, G_MIN], axis=1)
+
+    total_energy_sum = np.sum(block_energy_sums)
+    total_abs_magnetization_sum = np.sum(block_abs_magnetization_sums)
+    total_m2_sum = np.sum(block_m2_sums)
+    total_m4_sum = np.sum(block_m4_sums)
+    total_g_zero_sum = np.sum(block_g_zero_sums)
+    total_g_min_sum = np.sum(block_g_min_sums)
+    remaining_measurements = used_measurements - block_size
+
     names_with_error = [
         "energy",
         "abs_magnetization",
@@ -121,19 +139,35 @@ def block_jackknife(data, lattice_size, block_size):
     jackknife_values = {name: [] for name in names_with_error}
 
     for block in range(number_of_blocks):
-        first = block * block_size
-        last = first + block_size
-        sample = np.concatenate((used_data[:first], used_data[last:]))
+        mean_energy = (
+            total_energy_sum - block_energy_sums[block]
+        ) / remaining_measurements
+        mean_abs_magnetization = (
+            total_abs_magnetization_sum - block_abs_magnetization_sums[block]
+        ) / remaining_measurements
+        mean_m2 = (total_m2_sum - block_m2_sums[block]) / remaining_measurements
+        mean_m4 = (total_m4_sum - block_m4_sums[block]) / remaining_measurements
+        mean_g_zero = (
+            total_g_zero_sum - block_g_zero_sums[block]
+        ) / remaining_measurements
+        mean_g_min = (
+            total_g_min_sum - block_g_min_sums[block]
+        ) / remaining_measurements
 
         try:
-            sample_observables = calculate_observables(sample, lattice_size)
+            xi = calculate_xi([mean_g_zero], [mean_g_min], lattice_size)
+            if mean_m2 == 0.0:
+                raise ValueError("Binder non definito: <m^2> e' zero")
         except ValueError as error:
             raise ValueError(
                 f"campione jackknife {block + 1} non valido: {error}"
             ) from error
 
-        for name in names_with_error:
-            jackknife_values[name].append(sample_observables[name])
+        jackknife_values["energy"].append(mean_energy)
+        jackknife_values["abs_magnetization"].append(mean_abs_magnetization)
+        jackknife_values["binder"].append(mean_m4 / mean_m2**2)
+        jackknife_values["xi"].append(xi)
+        jackknife_values["r_xi"].append(xi / lattice_size)
 
     errors = {
         name: jackknife_error(jackknife_values[name]) for name in names_with_error
