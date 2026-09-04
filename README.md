@@ -136,8 +136,8 @@ nel file e la numerazione prosegue.
 ## Analisi Python
 
 Lo script `analyze.py` legge le sette colonne numeriche, ignora tutte le righe
-commentate e ricava `L` dall'intestazione. Si avvia indicando il numero di
-misure per blocco:
+commentate e ricava `L` e `beta` dall'intestazione. Si avvia indicando il
+numero di misure per blocco:
 
     python3 analyze.py example_data.dat --block-size 100
 
@@ -147,15 +147,28 @@ assoluta, `g_zero` e `g_min`. La cumulante di Binder usa la convenzione
     U = mean(m^4) / mean(m^2)^2
 
 La lunghezza `xi` usa il rapporto delle medie riportato sopra e `R_xi = xi/L`.
-Gli errori di energia, magnetizzazione assoluta, Binder, `xi` e `R_xi` sono
-stimati con un jackknife a blocchi. Binder e `xi` vengono ricalcolati da zero
-in ogni campione jackknife, perche' sono funzioni non lineari delle medie.
+La suscettivita' magnetica usa la convenzione
+
+    chi' = beta L^3 (mean(m^2) - mean(|m|)^2)
+
+Gli errori di energia, magnetizzazione assoluta, Binder, suscettivita', `xi` e
+`R_xi` sono stimati con un jackknife a blocchi. Binder, suscettivita' e `xi`
+vengono ricalcolati da zero in ogni campione jackknife, perche' sono funzioni
+non lineari delle medie.
 
 Vengono usati soltanto blocchi contigui completi. Le eventuali misure finali
 che non formano un blocco completo sono escluse e il loro numero viene
 stampato. Servono almeno due blocchi completi. Se l'argomento della radice di
 `xi` e' negativo, lo script termina con un messaggio di errore senza alterare
 il risultato.
+
+Per osservare come gli errori stimati cambiano al crescere della dimensione
+dei blocchi:
+
+    python blocking_plot.py data.dat
+
+Il grafico serve a scegliere una dimensione dei blocchi per la quale gli errori
+stimati hanno raggiunto un plateau approssimativamente stabile.
 
 ## File di configurazione
 

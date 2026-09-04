@@ -16,6 +16,7 @@ G_MIN = 6
 
 def read_data_file(filename):
     lattice_size = None
+    beta = None
 
     with open(filename, "r", encoding="utf-8") as file:
         for line in file:
@@ -25,9 +26,18 @@ def read_data_file(filename):
                     lattice_size = int(line.split("=", 1)[1])
                 except ValueError as error:
                     raise ValueError("valore di L non valido nell'intestazione") from error
+            elif line.startswith("# beta ="):
+                try:
+                    beta = float(line.split("=", 1)[1])
+                except ValueError as error:
+                    raise ValueError(
+                        "valore di beta non valido nell'intestazione"
+                    ) from error
 
     if lattice_size is None:
         raise ValueError("L non trovato nell'intestazione del file")
+    if beta is None:
+        raise ValueError("beta non trovato nell'intestazione del file")
 
     try:
         data = np.loadtxt(filename, comments="#", ndmin=2)
@@ -41,7 +51,7 @@ def read_data_file(filename):
             f"il file deve avere 7 colonne numeriche, ne ha {data.shape[1]}"
         )
 
-    return lattice_size, data
+    return lattice_size, beta, data
 
 
 def calculate_binder(magnetization):
@@ -71,7 +81,16 @@ def calculate_xi(g_zero, g_min, lattice_size):
     return math.sqrt(radicand) / (2.0 * math.sin(math.pi / lattice_size))
 
 
-def calculate_observables(data, lattice_size):
+def calculate_susceptibility(
+    magnetization, abs_magnetization, lattice_size, beta
+):
+    mean_m2 = np.mean(magnetization**2)
+    mean_abs_magnetization = np.mean(abs_magnetization)
+
+    return beta * lattice_size**3 * (mean_m2 - mean_abs_magnetization**2)
+
+
+def calculate_observables(data, lattice_size, beta):
     xi = calculate_xi(data[:, G_ZERO], data[:, G_MIN], lattice_size)
 
     return {
@@ -79,6 +98,12 @@ def calculate_observables(data, lattice_size):
         "magnetization": np.mean(data[:, MAGNETIZATION]),
         "abs_magnetization": np.mean(data[:, ABS_MAGNETIZATION]),
         "binder": calculate_binder(data[:, MAGNETIZATION]),
+        "susceptibility": calculate_susceptibility(
+            data[:, MAGNETIZATION],
+            data[:, ABS_MAGNETIZATION],
+            lattice_size,
+            beta,
+        ),
         "g_zero": np.mean(data[:, G_ZERO]),
         "g_min": np.mean(data[:, G_MIN]),
         "xi": xi,
@@ -98,7 +123,7 @@ def jackknife_error(values):
     )
 
 
-def block_jackknife(data, lattice_size, block_size):
+def block_jackknife(data, lattice_size, beta, block_size):
     if block_size <= 0:
         raise ValueError("block-size deve essere un intero positivo")
 
@@ -109,7 +134,7 @@ def block_jackknife(data, lattice_size, block_size):
     used_measurements = number_of_blocks * block_size
     excluded_measurements = len(data) - used_measurements
     used_data = data[:used_measurements]
-    observables = calculate_observables(used_data, lattice_size)
+    observables = calculate_observables(used_data, lattice_size, beta)
 
     blocks = used_data.reshape(number_of_blocks, block_size, 7)
     block_energy_sums = np.sum(blocks[:, :, ENERGY], axis=1)
@@ -133,6 +158,7 @@ def block_jackknife(data, lattice_size, block_size):
         "energy",
         "abs_magnetization",
         "binder",
+        "susceptibility",
         "xi",
         "r_xi",
     ]
@@ -166,6 +192,11 @@ def block_jackknife(data, lattice_size, block_size):
         jackknife_values["energy"].append(mean_energy)
         jackknife_values["abs_magnetization"].append(mean_abs_magnetization)
         jackknife_values["binder"].append(mean_m4 / mean_m2**2)
+        jackknife_values["susceptibility"].append(
+            beta
+            * lattice_size**3
+            * (mean_m2 - mean_abs_magnetization**2)
+        )
         jackknife_values["xi"].append(xi)
         jackknife_values["r_xi"].append(xi / lattice_size)
 
@@ -179,6 +210,7 @@ def block_jackknife(data, lattice_size, block_size):
 def print_results(
     filename,
     lattice_size,
+    beta,
     total_measurements,
     block_size,
     number_of_blocks,
@@ -189,6 +221,7 @@ def print_results(
 ):
     print(f"file: {filename}")
     print(f"L = {lattice_size}")
+    print(f"beta = {beta:.10g}")
     print(f"measurements = {total_measurements}")
     print(f"block size = {block_size}")
     print(f"blocks = {number_of_blocks}")
@@ -203,6 +236,10 @@ def print_results(
         f"+/- {errors['abs_magnetization']:.3g}"
     )
     print(f"Binder U = {observables['binder']:.10g} +/- {errors['binder']:.3g}")
+    print(
+        f"susceptibility = {observables['susceptibility']:.10g} "
+        f"+/- {errors['susceptibility']:.3g}"
+    )
     print(f"<g_zero> = {observables['g_zero']:.10g}")
     print(f"<g_min> = {observables['g_min']:.10g}")
     print(f"xi = {observables['xi']:.10g} +/- {errors['xi']:.3g}")
@@ -221,8 +258,10 @@ def main():
     arguments = parser.parse_args()
 
     try:
-        lattice_size, data = read_data_file(arguments.filename)
-        results = block_jackknife(data, lattice_size, arguments.block_size)
+        lattice_size, beta, data = read_data_file(arguments.filename)
+        results = block_jackknife(
+            data, lattice_size, beta, arguments.block_size
+        )
         observables, errors, blocks, used, excluded = results
     except (OSError, ValueError) as error:
         print(f"Errore: {error}", file=sys.stderr)
@@ -231,6 +270,7 @@ def main():
     print_results(
         arguments.filename,
         lattice_size,
+        beta,
         len(data),
         arguments.block_size,
         blocks,

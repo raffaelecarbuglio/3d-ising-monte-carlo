@@ -9,6 +9,7 @@ from analyze import (
     block_jackknife,
     calculate_binder,
     calculate_observables,
+    calculate_susceptibility,
     calculate_xi,
     jackknife_error,
     read_data_file,
@@ -27,21 +28,28 @@ def make_row(sweep, energy, magnetization, g_zero=4.0, g_min=1.0):
     ]
 
 
-def brute_force_block_jackknife(data, lattice_size, block_size):
+def brute_force_block_jackknife(data, lattice_size, beta, block_size):
     number_of_blocks = len(data) // block_size
     used_measurements = number_of_blocks * block_size
     excluded_measurements = len(data) - used_measurements
     used_data = data[:used_measurements]
-    observables = calculate_observables(used_data, lattice_size)
+    observables = calculate_observables(used_data, lattice_size, beta)
 
-    names = ["energy", "abs_magnetization", "binder", "xi", "r_xi"]
+    names = [
+        "energy",
+        "abs_magnetization",
+        "binder",
+        "susceptibility",
+        "xi",
+        "r_xi",
+    ]
     jackknife_values = {name: [] for name in names}
 
     for block in range(number_of_blocks):
         first = block * block_size
         last = first + block_size
         sample = np.concatenate((used_data[:first], used_data[last:]))
-        sample_observables = calculate_observables(sample, lattice_size)
+        sample_observables = calculate_observables(sample, lattice_size, beta)
 
         for name in names:
             jackknife_values[name].append(sample_observables[name])
@@ -61,9 +69,20 @@ class AnalysisTests(unittest.TestCase):
         g_min = np.array([1.0, 1.0])
         self.assertAlmostEqual(calculate_xi(g_zero, g_min, 4), math.sqrt(2.0))
 
+    def test_susceptibility(self):
+        magnetization = np.array([0.0, 1.0])
+        abs_magnetization = np.array([0.0, 1.0])
+
+        susceptibility = calculate_susceptibility(
+            magnetization, abs_magnetization, 2, 0.5
+        )
+
+        self.assertAlmostEqual(susceptibility, 1.0)
+
     def test_comments_in_the_middle_of_data_file(self):
         contents = """# Ising data
 # L = 4
+# beta = 0.22
 # columns
 0 -1.0 0.5 0.5 0.4 4.0 1.0
 # restart information
@@ -72,9 +91,10 @@ class AnalysisTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             filename = Path(directory) / "data.dat"
             filename.write_text(contents, encoding="utf-8")
-            lattice_size, data = read_data_file(filename)
+            lattice_size, beta, data = read_data_file(filename)
 
         self.assertEqual(lattice_size, 4)
+        self.assertEqual(beta, 0.22)
         self.assertEqual(data.shape, (2, 7))
         self.assertEqual(data[1, 0], 1.0)
 
@@ -89,7 +109,9 @@ class AnalysisTests(unittest.TestCase):
             ]
         )
 
-        observables, errors, blocks, used, excluded = block_jackknife(data, 4, 2)
+        observables, errors, blocks, used, excluded = block_jackknife(
+            data, 4, 0.2, 2
+        )
 
         self.assertEqual(blocks, 2)
         self.assertEqual(used, 4)
@@ -110,8 +132,8 @@ class AnalysisTests(unittest.TestCase):
             ]
         )
 
-        optimized = block_jackknife(data, 6, 2)
-        brute_force = brute_force_block_jackknife(data, 6, 2)
+        optimized = block_jackknife(data, 6, 0.22, 2)
+        brute_force = brute_force_block_jackknife(data, 6, 0.22, 2)
 
         for name in optimized[0]:
             self.assertAlmostEqual(optimized[0][name], brute_force[0][name])
@@ -134,7 +156,7 @@ class AnalysisTests(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(ValueError, "campione jackknife 1"):
-            block_jackknife(data, 4, 2)
+            block_jackknife(data, 4, 0.2, 2)
 
 
 if __name__ == "__main__":
