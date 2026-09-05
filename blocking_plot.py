@@ -22,7 +22,7 @@ def main():
         energy_errors = []
         chi_errors = []
         binder_errors = []
-        xi_errors = []
+        r_xi_errors = []
 
         block_size = 1
         while len(data) // block_size >= 20:
@@ -33,7 +33,7 @@ def main():
             energy_errors.append(errors["energy"])
             chi_errors.append(errors["susceptibility"])
             binder_errors.append(errors["binder"])
-            xi_errors.append(errors["xi"])
+            r_xi_errors.append(errors["r_xi"])
 
             block_size *= 2
     except (OSError, ValueError) as error:
@@ -43,7 +43,7 @@ def main():
     figure, axes = plt.subplots(2, 2, figsize=(10, 8))
 
     axes[0, 0].plot(block_sizes, energy_errors, "o-")
-    axes[0, 0].set_title("Energy")
+    axes[0, 0].set_title("Energy density e")
     axes[0, 0].set_xlabel("Block size")
     axes[0, 0].set_ylabel("Estimated error")
     axes[0, 0].set_xscale("log", base=2)
@@ -51,7 +51,7 @@ def main():
     axes[0, 0].grid(True)
 
     axes[0, 1].plot(block_sizes, chi_errors, "o-")
-    axes[0, 1].set_title("Susceptibility")
+    axes[0, 1].set_title("Susceptibility chi")
     axes[0, 1].set_xlabel("Block size")
     axes[0, 1].set_ylabel("Estimated error")
     axes[0, 1].set_xscale("log", base=2)
@@ -59,15 +59,15 @@ def main():
     axes[0, 1].grid(True)
 
     axes[1, 0].plot(block_sizes, binder_errors, "o-")
-    axes[1, 0].set_title("Binder cumulant")
+    axes[1, 0].set_title("Binder U")
     axes[1, 0].set_xlabel("Block size")
     axes[1, 0].set_ylabel("Estimated error")
     axes[1, 0].set_xscale("log", base=2)
     axes[1, 0].set_xticks(block_sizes, labels=block_sizes)
     axes[1, 0].grid(True)
 
-    axes[1, 1].plot(block_sizes, xi_errors, "o-")
-    axes[1, 1].set_title("Correlation length")
+    axes[1, 1].plot(block_sizes, r_xi_errors, "o-")
+    axes[1, 1].set_title("R_xi")
     axes[1, 1].set_xlabel("Block size")
     axes[1, 1].set_ylabel("Estimated error")
     axes[1, 1].set_xscale("log", base=2)

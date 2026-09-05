@@ -71,13 +71,24 @@ class AnalysisTests(unittest.TestCase):
 
     def test_susceptibility(self):
         magnetization = np.array([0.0, 1.0])
-        abs_magnetization = np.array([0.0, 1.0])
+        susceptibility = calculate_susceptibility(magnetization, 2)
 
-        susceptibility = calculate_susceptibility(
-            magnetization, abs_magnetization, 2, 0.5
-        )
+        self.assertAlmostEqual(susceptibility, 4.0)
 
-        self.assertAlmostEqual(susceptibility, 1.0)
+    def test_susceptibility_matches_g_zero_with_incomplete_tail(self):
+        data = np.array([
+            make_row(0, -1.0, 0.5, 2.0, 1.0),
+            make_row(1, -1.0, -0.5, 2.0, 1.0),
+            make_row(2, -2.0, 1.0, 8.0, 1.0),
+            make_row(3, -2.0, -1.0, 8.0, 1.0),
+            make_row(4, -1.0, 0.5, 2.0, 1.0),
+        ])
+        observables, errors, _, used, excluded = block_jackknife(data, 2, 0.5, 2)
+
+        self.assertEqual(excluded, 1)
+        self.assertEqual(observables["susceptibility"], 5.0)
+        self.assertEqual(observables["susceptibility"], np.mean(data[:used, 5]))
+        self.assertEqual(errors["susceptibility"], 3.0)
 
     def test_comments_in_the_middle_of_data_file(self):
         contents = """# Ising data
@@ -116,8 +127,8 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(blocks, 2)
         self.assertEqual(used, 4)
         self.assertEqual(excluded, 1)
-        self.assertAlmostEqual(observables["energy"], 2.5)
-        self.assertAlmostEqual(errors["energy"], 1.0)
+        self.assertAlmostEqual(observables["energy"], -2.5 / 3.0)
+        self.assertAlmostEqual(errors["energy"], 1.0 / 3.0)
 
     def test_optimized_jackknife_matches_brute_force(self):
         data = np.array(

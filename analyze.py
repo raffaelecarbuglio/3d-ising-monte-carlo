@@ -81,28 +81,24 @@ def calculate_xi(g_zero, g_min, lattice_size):
     return math.sqrt(radicand) / (2.0 * math.sin(math.pi / lattice_size))
 
 
-def calculate_susceptibility(
-    magnetization, abs_magnetization, lattice_size, beta
-):
+def calculate_susceptibility(magnetization, lattice_size):
     mean_m2 = np.mean(magnetization**2)
-    mean_abs_magnetization = np.mean(abs_magnetization)
 
-    return beta * lattice_size**3 * (mean_m2 - mean_abs_magnetization**2)
+    return lattice_size**3 * mean_m2
 
 
 def calculate_observables(data, lattice_size, beta):
     xi = calculate_xi(data[:, G_ZERO], data[:, G_MIN], lattice_size)
 
     return {
-        "energy": np.mean(data[:, ENERGY]),
+        # Il file contiene E/V; riportiamo e = -(E/V)/3.
+        "energy": -np.mean(data[:, ENERGY]) / 3.0,
         "magnetization": np.mean(data[:, MAGNETIZATION]),
         "abs_magnetization": np.mean(data[:, ABS_MAGNETIZATION]),
         "binder": calculate_binder(data[:, MAGNETIZATION]),
         "susceptibility": calculate_susceptibility(
             data[:, MAGNETIZATION],
-            data[:, ABS_MAGNETIZATION],
             lattice_size,
-            beta,
         ),
         "g_zero": np.mean(data[:, G_ZERO]),
         "g_min": np.mean(data[:, G_MIN]),
@@ -189,13 +185,11 @@ def block_jackknife(data, lattice_size, beta, block_size):
                 f"campione jackknife {block + 1} non valido: {error}"
             ) from error
 
-        jackknife_values["energy"].append(mean_energy)
+        jackknife_values["energy"].append(-mean_energy / 3.0)
         jackknife_values["abs_magnetization"].append(mean_abs_magnetization)
         jackknife_values["binder"].append(mean_m4 / mean_m2**2)
         jackknife_values["susceptibility"].append(
-            beta
-            * lattice_size**3
-            * (mean_m2 - mean_abs_magnetization**2)
+            lattice_size**3 * mean_m2
         )
         jackknife_values["xi"].append(xi)
         jackknife_values["r_xi"].append(xi / lattice_size)
@@ -229,20 +223,12 @@ def print_results(
     if excluded_measurements > 0:
         print(f"excluded measurements = {excluded_measurements}")
     print()
-    print(f"energy/spin = {observables['energy']:.10g} +/- {errors['energy']:.3g}")
-    print(f"<m> = {observables['magnetization']:.10g}")
+    print(f"energy density e = {observables['energy']:.10g} +/- {errors['energy']:.3g}")
     print(
-        f"<|m|> = {observables['abs_magnetization']:.10g} "
-        f"+/- {errors['abs_magnetization']:.3g}"
-    )
-    print(f"Binder U = {observables['binder']:.10g} +/- {errors['binder']:.3g}")
-    print(
-        f"susceptibility = {observables['susceptibility']:.10g} "
+        f"susceptibility chi = {observables['susceptibility']:.10g} "
         f"+/- {errors['susceptibility']:.3g}"
     )
-    print(f"<g_zero> = {observables['g_zero']:.10g}")
-    print(f"<g_min> = {observables['g_min']:.10g}")
-    print(f"xi = {observables['xi']:.10g} +/- {errors['xi']:.3g}")
+    print(f"Binder U = {observables['binder']:.10g} +/- {errors['binder']:.3g}")
     print(f"R_xi = {observables['r_xi']:.10g} +/- {errors['r_xi']:.3g}")
 
 
