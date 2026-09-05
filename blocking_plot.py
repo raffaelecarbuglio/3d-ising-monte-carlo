@@ -47,7 +47,8 @@ def main():
     axes[0, 0].set_xlabel("Block size")
     axes[0, 0].set_ylabel("Estimated error")
     axes[0, 0].set_xscale("log", base=2)
-    axes[0, 0].set_xticks(block_sizes, labels=block_sizes)
+    axes[0, 0].set_xticks(block_sizes)
+    axes[0, 0].set_xticklabels(block_sizes)
     axes[0, 0].grid(True)
 
     axes[0, 1].plot(block_sizes, chi_errors, "o-")
@@ -55,7 +56,8 @@ def main():
     axes[0, 1].set_xlabel("Block size")
     axes[0, 1].set_ylabel("Estimated error")
     axes[0, 1].set_xscale("log", base=2)
-    axes[0, 1].set_xticks(block_sizes, labels=block_sizes)
+    axes[0, 1].set_xticks(block_sizes)
+    axes[0, 1].set_xticklabels(block_sizes)
     axes[0, 1].grid(True)
 
     axes[1, 0].plot(block_sizes, binder_errors, "o-")
@@ -63,7 +65,8 @@ def main():
     axes[1, 0].set_xlabel("Block size")
     axes[1, 0].set_ylabel("Estimated error")
     axes[1, 0].set_xscale("log", base=2)
-    axes[1, 0].set_xticks(block_sizes, labels=block_sizes)
+    axes[1, 0].set_xticks(block_sizes)
+    axes[1, 0].set_xticklabels(block_sizes)
     axes[1, 0].grid(True)
 
     axes[1, 1].plot(block_sizes, r_xi_errors, "o-")
@@ -71,7 +74,8 @@ def main():
     axes[1, 1].set_xlabel("Block size")
     axes[1, 1].set_ylabel("Estimated error")
     axes[1, 1].set_xscale("log", base=2)
-    axes[1, 1].set_xticks(block_sizes, labels=block_sizes)
+    axes[1, 1].set_xticks(block_sizes)
+    axes[1, 1].set_xticklabels(block_sizes)
     axes[1, 1].grid(True)
 
     figure.tight_layout()
