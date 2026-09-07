@@ -34,6 +34,9 @@ def read_data_file(filename):
                         "valore di beta non valido nell'intestazione"
                     ) from error
 
+            if lattice_size is not None and beta is not None:
+                break
+
     if lattice_size is None:
         raise ValueError("L non trovato nell'intestazione del file")
     if beta is None:
@@ -150,52 +153,46 @@ def block_jackknife(data, lattice_size, beta, block_size):
     total_g_min_sum = np.sum(block_g_min_sums)
     remaining_measurements = used_measurements - block_size
 
-    names_with_error = [
-        "energy",
-        "abs_magnetization",
-        "binder",
-        "susceptibility",
-        "xi",
-        "r_xi",
-    ]
-    jackknife_values = {name: [] for name in names_with_error}
+    # Ogni elemento contiene la media con un blocco escluso.
+    mean_energy = (
+        total_energy_sum - block_energy_sums
+    ) / remaining_measurements
+    mean_abs_magnetization = (
+        total_abs_magnetization_sum - block_abs_magnetization_sums
+    ) / remaining_measurements
+    mean_m2 = (total_m2_sum - block_m2_sums) / remaining_measurements
+    mean_m4 = (total_m4_sum - block_m4_sums) / remaining_measurements
+    mean_g_zero = (
+        total_g_zero_sum - block_g_zero_sums
+    ) / remaining_measurements
+    mean_g_min = (
+        total_g_min_sum - block_g_min_sums
+    ) / remaining_measurements
 
-    for block in range(number_of_blocks):
-        mean_energy = (
-            total_energy_sum - block_energy_sums[block]
-        ) / remaining_measurements
-        mean_abs_magnetization = (
-            total_abs_magnetization_sum - block_abs_magnetization_sums[block]
-        ) / remaining_measurements
-        mean_m2 = (total_m2_sum - block_m2_sums[block]) / remaining_measurements
-        mean_m4 = (total_m4_sum - block_m4_sums[block]) / remaining_measurements
-        mean_g_zero = (
-            total_g_zero_sum - block_g_zero_sums[block]
-        ) / remaining_measurements
-        mean_g_min = (
-            total_g_min_sum - block_g_min_sums[block]
-        ) / remaining_measurements
-
-        try:
-            xi = calculate_xi([mean_g_zero], [mean_g_min], lattice_size)
-            if mean_m2 == 0.0:
-                raise ValueError("Binder non definito: <m^2> e' zero")
-        except ValueError as error:
-            raise ValueError(
-                f"campione jackknife {block + 1} non valido: {error}"
-            ) from error
-
-        jackknife_values["energy"].append(-mean_energy / 3.0)
-        jackknife_values["abs_magnetization"].append(mean_abs_magnetization)
-        jackknife_values["binder"].append(mean_m4 / mean_m2**2)
-        jackknife_values["susceptibility"].append(
-            lattice_size**3 * mean_m2
+    if np.any(mean_g_min <= 0.0):
+        raise ValueError(
+            "campione jackknife non valido: <g_min> deve essere positivo"
         )
-        jackknife_values["xi"].append(xi)
-        jackknife_values["r_xi"].append(xi / lattice_size)
 
+    radicand = mean_g_zero / mean_g_min - 1.0
+    if np.any(radicand < 0.0):
+        raise ValueError(
+            "campione jackknife non valido: <g_zero>/<g_min> - 1 e' negativo; "
+            "la statistica puo' essere insufficiente"
+        )
+    if np.any(mean_m2 == 0.0):
+        raise ValueError(
+            "campione jackknife non valido: Binder non definito, <m^2> e' zero"
+        )
+
+    xi = np.sqrt(radicand) / (2.0 * math.sin(math.pi / lattice_size))
     errors = {
-        name: jackknife_error(jackknife_values[name]) for name in names_with_error
+        "energy": jackknife_error(-mean_energy / 3.0),
+        "abs_magnetization": jackknife_error(mean_abs_magnetization),
+        "binder": jackknife_error(mean_m4 / mean_m2**2),
+        "susceptibility": jackknife_error(lattice_size**3 * mean_m2),
+        "xi": jackknife_error(xi),
+        "r_xi": jackknife_error(xi / lattice_size),
     }
 
     return observables, errors, number_of_blocks, used_measurements, excluded_measurements

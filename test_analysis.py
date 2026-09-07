@@ -143,14 +143,16 @@ class AnalysisTests(unittest.TestCase):
             ]
         )
 
-        optimized = block_jackknife(data, 6, 0.22, 2)
-        brute_force = brute_force_block_jackknife(data, 6, 0.22, 2)
+        for block_size in (1, 2, 3):
+            with self.subTest(block_size=block_size):
+                optimized = block_jackknife(data, 6, 0.22, block_size)
+                brute_force = brute_force_block_jackknife(data, 6, 0.22, block_size)
 
-        for name in optimized[0]:
-            self.assertAlmostEqual(optimized[0][name], brute_force[0][name])
-        for name in optimized[1]:
-            self.assertAlmostEqual(optimized[1][name], brute_force[1][name])
-        self.assertEqual(optimized[2:], brute_force[2:])
+                for name in optimized[0]:
+                    self.assertAlmostEqual(optimized[0][name], brute_force[0][name])
+                for name in optimized[1]:
+                    self.assertAlmostEqual(optimized[1][name], brute_force[1][name])
+                self.assertEqual(optimized[2:], brute_force[2:])
 
     def test_negative_xi_radicand_is_an_error(self):
         with self.assertRaisesRegex(ValueError, "negativo"):
@@ -166,8 +168,26 @@ class AnalysisTests(unittest.TestCase):
             ]
         )
 
-        with self.assertRaisesRegex(ValueError, "campione jackknife 1"):
+        with self.assertRaisesRegex(ValueError, "campione jackknife.*negativo"):
             block_jackknife(data, 4, 0.2, 2)
+
+    def test_nonpositive_jackknife_g_min_is_an_error(self):
+        for g_min in (0.0, -1.0):
+            with self.subTest(g_min=g_min):
+                data = np.array([
+                    make_row(0, -1.0, 0.5, 4.0, 2.0),
+                    make_row(1, -1.0, 0.5, 4.0, g_min),
+                ])
+                with self.assertRaisesRegex(ValueError, "campione jackknife.*positivo"):
+                    block_jackknife(data, 4, 0.2, 1)
+
+    def test_zero_jackknife_m2_is_an_error(self):
+        data = np.array([
+            make_row(0, -1.0, 0.5),
+            make_row(1, -1.0, 0.0),
+        ])
+        with self.assertRaisesRegex(ValueError, "campione jackknife.*Binder.*zero"):
+            block_jackknife(data, 4, 0.2, 1)
 
 
 if __name__ == "__main__":
