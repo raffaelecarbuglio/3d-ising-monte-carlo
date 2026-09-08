@@ -5,3 +5,6 @@ tests
 example_config.dat
 example_data.dat
 .venv/
+data/*
+!data/.gitkeep
+*.log

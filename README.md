@@ -10,6 +10,17 @@ l'algoritmo di cluster Wolff. La scelta resta fissa per tutta l'esecuzione.
 Il reticolo e' memorizzato con `x` come coordinata piu' rapida. PCG32 fornisce
 i numeri casuali usati dai due algoritmi.
 
+## Organizzazione dei file
+
+- `inputs/`: file di input delle simulazioni.
+- `data/`: dati e configurazioni generati, esclusi da Git salvo `.gitkeep`.
+- `plots/`: grafici generati, che possono essere aggiunti a Git.
+
+Sorgenti C, script di analisi, test e file di configurazione del progetto
+restano nella root. I risultati gia' presenti nella root restano al loro posto.
+Eseguire i comandi seguenti dalla root del repository: anche i percorsi scritti
+negli input sono relativi alla directory di lavoro, non a `inputs/`.
+
 ## Compilazione e test
 
 Servono GCC, Make e la libreria matematica standard, normalmente gia'
@@ -30,12 +41,12 @@ Per eliminare eseguibili, file oggetto e risultati degli esempi:
 
 Il programma riceve il nome del file di input:
 
-    ./ising input_example.dat
+    ./ising inputs/input_example.dat
 
 L'esempio parte da tutti gli spin uguali a `+1`. Dopo la sua conclusione si
 puo' continuare la simulazione con:
 
-    ./ising input_restart_example.dat
+    ./ising inputs/input_restart_example.dat
 
 Con `start = random` la configurazione iniziale e' casuale. Una simulazione
 `ordered` o `random` non sovrascrive mai un `data_file` esistente.
@@ -61,8 +72,8 @@ Per `start = ordered` o `start = random` il formato e':
     seed = 12345
     start = ordered
     algorithm = metropolis
-    config_file = example_config.dat
-    data_file = example_data.dat
+    config_file = data/example_config.dat
+    data_file = data/example_data.dat
 
 Per un restart si usa lo stesso campo `config_file`:
 
@@ -74,8 +85,8 @@ Per un restart si usa lo stesso campo `config_file`:
     seed = 67890
     start = restart
     algorithm = metropolis
-    config_file = example_config.dat
-    data_file = example_data.dat
+    config_file = data/example_config.dat
+    data_file = data/example_data.dat
 
 Significato dei parametri:
 
@@ -139,7 +150,7 @@ Lo script `analyze.py` legge le sette colonne numeriche, ignora tutte le righe
 commentate e ricava `L` e `beta` dall'intestazione. Si avvia indicando il
 numero di misure per blocco:
 
-    python3 analyze.py example_data.dat --block-size 100
+    python3 analyze.py data/example_data.dat --block-size 100
 
 Lo script calcola le medie di energia, magnetizzazione, magnetizzazione
 assoluta, `g_zero` e `g_min`. La cumulante di Binder usa la convenzione
@@ -165,10 +176,12 @@ il risultato.
 Per osservare come gli errori stimati cambiano al crescere della dimensione
 dei blocchi:
 
-    python blocking_plot.py data.dat
+    python3 blocking_plot.py data/example_data.dat
 
 Il grafico serve a scegliere una dimensione dei blocchi per la quale gli errori
 stimati hanno raggiunto un plateau approssimativamente stabile.
+Lo script crea `plots/` se manca e salva `plots/blocking_plateau.png`,
+sovrascrivendo il grafico precedente.
 
 ## File di configurazione
 

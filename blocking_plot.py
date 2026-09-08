@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+from pathlib import Path
 import sys
 
 import matplotlib.pyplot as plt
@@ -79,7 +80,8 @@ def main():
     axes[1, 1].grid(True)
 
     figure.tight_layout()
-    figure.savefig("blocking_plateau.png")
+    Path("plots").mkdir(exist_ok=True)
+    figure.savefig("plots/blocking_plateau.png")
     plt.show()
 
     return 0
