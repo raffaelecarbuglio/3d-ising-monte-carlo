@@ -20,6 +20,5 @@ ising.o: ising.c ising.h rng.h
 rng.o: rng.c rng.h
 tests.o: tests.c ising.h rng.h
 clean:
-	clean:
 	rm -f ising tests *.o *.tmp
 	rm -rf __pycache__
