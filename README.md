@@ -17,9 +17,9 @@ i numeri casuali usati dai due algoritmi.
 - `plots/`: grafici generati, che possono essere aggiunti a Git.
 
 Sorgenti C, script di analisi, test e file di configurazione del progetto
-restano nella root. I risultati gia' presenti nella root restano al loro posto.
-Eseguire i comandi seguenti dalla root del repository: anche i percorsi scritti
-negli input sono relativi alla directory di lavoro, non a `inputs/`.
+restano nella root. Eseguire i comandi seguenti dalla root del repository:
+anche i percorsi scritti negli input sono relativi alla directory di lavoro,
+non a `inputs/`.
 
 ## Compilazione e test
 
@@ -33,7 +33,7 @@ I test dell'analisi richiedono Python 3 e NumPy:
 
     make test-analysis
 
-Per eliminare eseguibili, file oggetto e risultati degli esempi:
+Per eliminare eseguibili, file oggetto e file temporanei:
 
     make clean
 
@@ -160,7 +160,7 @@ assoluta, `g_zero` e `g_min`. La cumulante di Binder usa la convenzione
 La lunghezza `xi` usa il rapporto delle medie riportato sopra e `R_xi = xi/L`.
 La suscettivita' magnetica usa la convenzione
 
-    chi' = beta L^3 (mean(m^2) - mean(|m|)^2)
+    chi = L^3 mean(m^2)
 
 Gli errori di energia, magnetizzazione assoluta, Binder, suscettivita', `xi` e
 `R_xi` sono stimati con un jackknife a blocchi. Binder, suscettivita' e `xi`
