@@ -183,6 +183,33 @@ stimati hanno raggiunto un plateau approssimativamente stabile.
 Lo script crea `plots/` se manca e salva `plots/blocking_plateau.png`,
 sovrascrivendo il grafico precedente.
 
+### Grafico U in funzione di R_xi
+
+Per aggiungere al riepilogo i risultati gia' calcolati dall'analisi:
+
+    python3 analyze.py data/L8_beta0215.dat --block-size 100 --summary-output summary.txt
+    python3 analyze.py data/L8_beta0220.dat --block-size 100 --summary-output summary.txt
+    python3 analyze.py data/L16_beta0220.dat --block-size 200 --summary-output summary.txt
+
+I nomi dei file e le dimensioni dei blocchi sono esempi: usa i tuoi file e
+scegli i blocchi sulla base del plateau degli errori. Il riepilogo contiene
+`L beta Rxi err_Rxi U err_U`, con intestazione commentata. Ogni esecuzione
+con `--summary-output` aggiunge una riga, anche se la stessa simulazione era
+gia' stata analizzata. Non vengono ricalcolate osservabili per il salvataggio.
+Senza questa opzione, l'output a terminale resta quello consueto.
+
+Per creare il grafico:
+
+    python3 plot_u_vs_rxi.py summary.txt
+
+Lo script raggruppa per `L`, ordina per `R_xi` e mostra errori orizzontali e
+verticali, con marcatori distinti e senza curve o fit. Salva
+`plots/u_vs_rxi.png` (sovrascrivendolo se esiste) e mostra la figura.
+Per scegliere un altro percorso usa `--output plots/mio_grafico.png`.
+Per salvare senza interfaccia grafica:
+
+    MPLBACKEND=Agg python3 plot_u_vs_rxi.py summary.txt
+
 ## File di configurazione
 
 La configurazione e' un file testuale con questa struttura:

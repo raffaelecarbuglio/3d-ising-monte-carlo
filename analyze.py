@@ -229,9 +229,25 @@ def print_results(
     print(f"R_xi = {observables['r_xi']:.10g} +/- {errors['r_xi']:.3g}")
 
 
+def save_summary(filename, lattice_size, beta, observables, errors):
+    # Riusa i risultati del jackknife: non ricalcola le osservabili.
+    with open(filename, "a", encoding="utf-8") as file:
+        if file.tell() == 0:
+            file.write("# L beta Rxi err_Rxi U err_U\n")
+        file.write(
+            f"{lattice_size} {beta:.17g} "
+            f"{observables['r_xi']:.17g} {errors['r_xi']:.17g} "
+            f"{observables['binder']:.17g} {errors['binder']:.17g}\n"
+        )
+
+
 def main():
     parser = argparse.ArgumentParser(description="Analizza le misure del modello di Ising")
     parser.add_argument("filename", help="file delle misure prodotto dal simulatore")
+    parser.add_argument(
+        "--summary-output",
+        help="aggiunge i risultati al file di riepilogo indicato",
+    )
     parser.add_argument(
         "--block-size",
         type=int,
@@ -246,6 +262,10 @@ def main():
             data, lattice_size, beta, arguments.block_size
         )
         observables, errors, blocks, used, excluded = results
+        if arguments.summary_output is not None:
+            save_summary(
+                arguments.summary_output, lattice_size, beta, observables, errors
+            )
     except (OSError, ValueError) as error:
         print(f"Errore: {error}", file=sys.stderr)
         return 1
