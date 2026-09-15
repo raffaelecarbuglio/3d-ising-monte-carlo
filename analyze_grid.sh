@@ -84,7 +84,7 @@ rm -f "$SUMMARY_FILE" "$LOG_FILE"
 
 shopt -s nullglob
 
-DATA_FILES=("$RESULTS_DIR"/L*_data.dat)
+DATA_FILES=("$RESULTS_DIR"/L*_data.dat "$RESULTS_DIR"/L*_data.dat.gz)
 
 shopt -u nullglob
 

@@ -1,6 +1,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "input.h"
 #include "ising.h"
 #include "rng.h"
@@ -8,37 +9,59 @@
 static FILE *open_data_file(const SimulationParameters *p, int initial_sweep)
 {
     FILE *file;
-    const char *last_column;
-
-    if (p->algorithm == ALGORITHM_METROPOLIS) {
-        last_column = "acceptance";
-    } else {
-        last_column = "cluster_fraction";
-    }
+    const char *columns = "# columns: sweep energy magnetization g_min\n";
 
     if (p->start == START_RESTART) {
         /* Un restart aggiunge un segmento breve al file esistente o ne crea uno. */
-        file = fopen(p->data_file, "a");
+        char line[512];
+        int has_contents = 0;
+        int same_columns = 0;
+
+        file = fopen(p->data_file, "a+");
         if (file == NULL) {
             fprintf(stderr, "Errore: impossibile aggiungere dati a '%s'.\n", p->data_file);
             return NULL;
         }
-        if (fprintf(file,
-                    "#\n"
-                    "# restart: initial_sweep=%d beta=%.17g "
-                    "seed=%d n_therm=%d "
-                    "n_sweeps=%d measure_every=%d algorithm=%s\n"
-                    "# config_file=%s\n",
-                    initial_sweep, p->beta, p->seed, p->n_therm,
-                    p->n_sweeps, p->measure_every,
-                    algorithm_name(p->algorithm), p->config_file) < 0) {
+        rewind(file);
+        while (fgets(line, sizeof(line), file) != NULL) {
+            has_contents = 1;
+            if (strcmp(line, columns) == 0) {
+                same_columns = 1;
+                break;
+            }
+            if (line[0] != '#') {
+                break;
+            }
+        }
+        if (ferror(file) || (has_contents && !same_columns)) {
+            fprintf(stderr,
+                    "Errore: formato dati incompatibile in '%s'; "
+                    "usare un nuovo data_file per il restart.\n", p->data_file);
             fclose(file);
             return NULL;
         }
-        return file;
+        if (fseek(file, 0, SEEK_END) != 0) {
+            fclose(file);
+            return NULL;
+        }
+        if (has_contents) {
+            if (fprintf(file,
+                        "#\n"
+                        "# restart: initial_sweep=%d beta=%.17g "
+                        "seed=%d n_therm=%d "
+                        "n_sweeps=%d measure_every=%d algorithm=%s\n"
+                        "# config_file=%s\n",
+                        initial_sweep, p->beta, p->seed, p->n_therm,
+                        p->n_sweeps, p->measure_every,
+                        algorithm_name(p->algorithm), p->config_file) < 0) {
+                fclose(file);
+                return NULL;
+            }
+            return file;
+        }
+    } else {
+        file = fopen(p->data_file, "wx");
     }
-
-    file = fopen(p->data_file, "wx");
     if (file == NULL) {
         fprintf(stderr,
                 "Errore: impossibile creare il file dati '%s'; "
@@ -57,12 +80,11 @@ static FILE *open_data_file(const SimulationParameters *p, int initial_sweep)
                 "# n_sweeps = %d\n"
                 "# measure_every = %d\n"
                 "# config_file = %s\n"
-                "# columns: sweep energy_per_spin magnetization_per_spin "
-                "abs_magnetization_per_spin %s g_zero g_min\n",
+                "%s",
                 p->L, p->beta, p->seed, start_mode_name(p->start),
                 algorithm_name(p->algorithm),
                 p->n_therm, p->n_sweeps, p->measure_every,
-                p->config_file, last_column) < 0) {
+                p->config_file, columns) < 0) {
         fclose(file);
         return NULL;
     }
@@ -70,21 +92,18 @@ static FILE *open_data_file(const SimulationParameters *p, int initial_sweep)
 }
 
 static int write_measurement(FILE *file, const IsingLattice *lattice,
-                             int sweep, double update_measure,
+                             int sweep,
                              const double *cos_table, const double *sin_table)
 {
     int energy = ising_total_energy(lattice);
     double n = (double)lattice->n_spins;
-    double magnetization = 0.0;
+    int magnetization = 0;
     double real_x = 0.0;
     double imaginary_x = 0.0;
     double real_y = 0.0;
     double imaginary_y = 0.0;
     double real_z = 0.0;
     double imaginary_z = 0.0;
-    double m;
-    double abs_m;
-    double g_zero;
     double g_min;
     int x;
     int y;
@@ -107,16 +126,12 @@ static int write_measurement(FILE *file, const IsingLattice *lattice,
         }
     }
 
-    m = magnetization / n;
-    abs_m = fabs(m);
-    g_zero = magnetization * magnetization / n;
     g_min = (real_x * real_x + imaginary_x * imaginary_x
            + real_y * real_y + imaginary_y * imaginary_y
            + real_z * real_z + imaginary_z * imaginary_z) / (3.0 * n);
 
-    if (fprintf(file, "%d %.12g %.12g %.12g %.12g %.12g %.12g\n",
-                sweep, (double)energy / n, m, abs_m, update_measure,
-                g_zero, g_min) < 0) {
+    if (fprintf(file, "%d %d %d %.8g\n",
+                sweep, energy, magnetization, g_min) < 0) {
         return 0;
     }
     return 1;
@@ -134,8 +149,6 @@ static int run_simulation(const SimulationParameters *p)
     double sin_table[ISING_MAX_L];
     double minimum_momentum;
     int previous_sweeps = 0;
-    int changed_spins = 0;
-    int update_count = 0;
     int sweep;
     int coordinate;
     int ok = 1;
@@ -207,31 +220,19 @@ static int run_simulation(const SimulationParameters *p)
     /* 6. Produzione e scrittura periodica delle misure. */
     for (sweep = 1; sweep <= p->n_sweeps; sweep++) {
         if (p->algorithm == ALGORITHM_METROPOLIS) {
-            changed_spins += ising_metropolis_sweep(&lattice, p->beta, &rng);
-            update_count += lattice.n_spins;
+            ising_metropolis_sweep(&lattice, p->beta, &rng);
         } else {
-            changed_spins += ising_wolff_update(&lattice, wolff_probability,
-                                                &rng, cluster, in_cluster);
-            update_count++;
+            ising_wolff_update(&lattice, wolff_probability,
+                               &rng, cluster, in_cluster);
         }
 
         if (sweep % p->measure_every == 0) {
-            double update_measure;
-
-            if (p->algorithm == ALGORITHM_METROPOLIS) {
-                update_measure = (double)changed_spins / (double)update_count;
-            } else {
-                update_measure = (double)changed_spins
-                               / ((double)update_count * lattice.n_spins);
-            }
             if (!write_measurement(data, &lattice, previous_sweeps + sweep,
-                                   update_measure, cos_table, sin_table)) {
+                                   cos_table, sin_table)) {
                 fprintf(stderr, "Errore durante la scrittura delle misure.\n");
                 ok = 0;
                 break;
             }
-            changed_spins = 0;
-            update_count = 0;
         }
     }
 

@@ -106,28 +106,26 @@ Significato dei parametri:
 
 Una nuova simulazione crea un'intestazione commentata contenente modello, `L`,
 `beta`, seed, modalita' iniziale, numeri di sweep, intervallo di misura,
-`config_file` e nomi delle colonne. Con Metropolis le righe numeriche hanno
-questa forma:
+`config_file` e nomi delle colonne. Sia Metropolis sia Wolff scrivono:
 
-    sweep energy_per_spin magnetization_per_spin abs_magnetization_per_spin acceptance g_zero g_min
+    sweep energy magnetization g_min
 
-`sweep` e' il numero complessivo di sweep di produzione. `acceptance` e' la
-frazione dei tentativi accettati dall'ultima misura. Energia e magnetizzazione
-sono divise per `L^3`; ogni legame contribuisce una volta all'energia.
+`energy` e `magnetization` sono i totali interi `E` e `M`: ogni legame
+contribuisce una volta all'energia. `sweep` conta gli sweep di produzione;
+per Wolff ogni aggiornamento di un cluster conta come uno sweep.
+Non vengono piu' salvate acceptance o cluster_fraction.
 
-Con Wolff ogni aggiornamento costruisce e inverte un cluster e viene contato
-come uno sweep. La quinta colonna si chiama `cluster_fraction` e contiene la
-dimensione media dei cluster dall'ultima misura, divisa per il numero di spin:
+Solo `g_min` richiede un numero in virgola mobile e viene scritto con `%.8g`
+(otto cifre significative). `beta` resta scritto con `%.17g` nell'intestazione.
+`g_min` e' lo stimatore al minimo impulso non nullo `2 pi / L`, mediato sui
+tre impulsi equivalenti lungo `x`, `y` e `z`.
 
-    sweep energy_per_spin magnetization_per_spin abs_magnetization_per_spin cluster_fraction g_zero g_min
+L'analisi ricostruisce le quantita' ridondanti, con `V = L^3`:
 
-Le ultime due colonne sono gli stimatori della funzione di correlazione in
-spazio degli impulsi. Per ogni configurazione misurata il programma calcola
-
-    g_zero = M^2 / L^3
-
-e `g_min` al minimo impulso non nullo `2 pi / L`. Per ridurre il rumore,
-`g_min` e' la media sui tre impulsi equivalenti lungo `x`, `y` e `z`.
+    m = M / V
+    abs_m = abs(M) / V
+    g_zero = M^2 / V
+    e = -E / (3 V)
 
 La lunghezza di correlazione del secondo momento deve essere calcolata usando
 le medie sulle configurazioni:
@@ -142,12 +140,41 @@ segnalata come non valida e non sostituita artificialmente con zero.
 Un restart aggiunge soltanto un breve blocco commentato con lo sweep iniziale,
 i parametri del nuovo segmento e `config_file`. Non ripete
 l'intestazione completa o i nomi delle colonne. Le misure precedenti restano
-nel file e la numerazione prosegue.
+nel file e la numerazione prosegue. Se il file dati non esiste o e' vuoto,
+viene scritta l'intestazione completa.
+
+Il nuovo simulatore rifiuta di aggiungere righe a quattro colonne a un vecchio
+file a sette colonne. Per continuare una vecchia simulazione, mantenere
+`config_file` e scegliere un nuovo `data_file`.
+
+## Compressione dei dati completati
+
+Dopo aver terminato una simulazione e la sua analisi, si puo' comprimere il
+file di misure con:
+
+    gzip data/example_data.dat
+
+Questo sostituisce il file con `data/example_data.dat.gz`. La compressione
+e' senza perdita: il contenuto testuale resta identico. Per ispezionarlo:
+
+    zless data/example_data.dat.gz
+
+`analyze.py` e `blocking_plot.py` leggono direttamente anche `.dat.gz`;
+`analyze_grid.sh` trova sia i file `.dat` sia i file `.dat.gz` di un batch:
+
+    python3 analyze.py data/example_data.dat.gz --block-size 100
+
+La compressione e' un passo esplicito, esterno al simulatore. Lasciare
+non compressi i file a cui si vogliono aggiungere altre misure. Per riprendere
+un file compresso nel nuovo formato, prima usare:
+
+    gunzip data/example_data.dat.gz
 
 ## Analisi Python
 
-Lo script `analyze.py` legge le sette colonne numeriche, ignora tutte le righe
-commentate e ricava `L` e `beta` dall'intestazione. Si avvia indicando il
+Lo script `analyze.py` legge le quattro colonne numeriche (oppure il vecchio
+formato a sette colonne), ignora le righe commentate e ricava `L` e `beta`
+dall'intestazione. Si avvia indicando il
 numero di misure per blocco:
 
     python3 analyze.py data/example_data.dat --block-size 100
