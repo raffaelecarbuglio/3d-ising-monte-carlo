@@ -41,7 +41,7 @@ def main():
         print(f"Errore: {error}", file=sys.stderr)
         return 1
 
-    figure, axes = plt.subplots(2, 2, figsize=(10, 8))
+    figure, axes = plt.subplots(2, 2, figsize=(12, 8))
 
     axes[0, 0].plot(block_sizes, energy_errors, "o-")
     axes[0, 0].set_title("Energy density e")
@@ -49,7 +49,7 @@ def main():
     axes[0, 0].set_ylabel("Estimated error")
     axes[0, 0].set_xscale("log", base=2)
     axes[0, 0].set_xticks(block_sizes)
-    axes[0, 0].set_xticklabels(block_sizes)
+    axes[0, 0].set_xticklabels(block_sizes, rotation=45, ha="right")
     axes[0, 0].grid(True)
 
     axes[0, 1].plot(block_sizes, chi_errors, "o-")
@@ -58,7 +58,7 @@ def main():
     axes[0, 1].set_ylabel("Estimated error")
     axes[0, 1].set_xscale("log", base=2)
     axes[0, 1].set_xticks(block_sizes)
-    axes[0, 1].set_xticklabels(block_sizes)
+    axes[0, 1].set_xticklabels(block_sizes, rotation=45, ha="right")
     axes[0, 1].grid(True)
 
     axes[1, 0].plot(block_sizes, binder_errors, "o-")
@@ -67,7 +67,7 @@ def main():
     axes[1, 0].set_ylabel("Estimated error")
     axes[1, 0].set_xscale("log", base=2)
     axes[1, 0].set_xticks(block_sizes)
-    axes[1, 0].set_xticklabels(block_sizes)
+    axes[1, 0].set_xticklabels(block_sizes, rotation=45, ha="right")
     axes[1, 0].grid(True)
 
     axes[1, 1].plot(block_sizes, r_xi_errors, "o-")
@@ -76,7 +76,7 @@ def main():
     axes[1, 1].set_ylabel("Estimated error")
     axes[1, 1].set_xscale("log", base=2)
     axes[1, 1].set_xticks(block_sizes)
-    axes[1, 1].set_xticklabels(block_sizes)
+    axes[1, 1].set_xticklabels(block_sizes, rotation=45, ha="right")
     axes[1, 1].grid(True)
 
     figure.tight_layout()
