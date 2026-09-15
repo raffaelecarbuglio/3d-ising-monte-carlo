@@ -55,19 +55,16 @@ static int count_numeric_lines(const char *filename)
 
     while (fgets(line, sizeof(line), file) != NULL) {
         unsigned long long sweep;
-        double energy;
-        double magnetization;
-        double abs_magnetization;
-        double acceptance;
-        double g_zero;
+        int energy;
+        int magnetization;
         double g_min;
+        char extra;
 
         if (line[0] == '#') {
             continue;
         }
-        if (sscanf(line, "%llu %lf %lf %lf %lf %lf %lf", &sweep, &energy,
-                   &magnetization, &abs_magnetization, &acceptance,
-                   &g_zero, &g_min) != 7) {
+        if (sscanf(line, "%llu %d %d %lf %c", &sweep, &energy,
+                   &magnetization, &g_min, &extra) != 4) {
             fclose(file);
             return -1;
         }
@@ -101,16 +98,12 @@ static unsigned long long last_sweep(const char *filename)
     return value;
 }
 
-static int first_structure_factors(const char *filename,
-                                   double *g_zero, double *g_min)
+static int first_measurement(const char *filename,
+                             int *energy, int *magnetization, double *g_min)
 {
     FILE *file;
     char line[512];
     unsigned long long sweep;
-    double energy;
-    double magnetization;
-    double abs_magnetization;
-    double update_measure;
 
     file = fopen(filename, "r");
     if (file == NULL) {
@@ -119,9 +112,8 @@ static int first_structure_factors(const char *filename,
 
     while (fgets(line, sizeof(line), file) != NULL) {
         if (line[0] != '#' &&
-            sscanf(line, "%llu %lf %lf %lf %lf %lf %lf",
-                   &sweep, &energy, &magnetization, &abs_magnetization,
-                   &update_measure, g_zero, g_min) == 7) {
+            sscanf(line, "%llu %d %d %lf",
+                   &sweep, energy, magnetization, g_min) == 4) {
             fclose(file);
             return 1;
         }
@@ -318,6 +310,20 @@ static void test_restart(void)
     check(last_sweep("test_data.tmp") == 8,
           "restart continua la numerazione degli sweep");
 
+    write_text("test_data.tmp",
+               "# columns: sweep energy_per_spin magnetization_per_spin "
+               "abs_magnetization_per_spin acceptance g_zero g_min\n"
+               "8 -3 1 1 0 27 0\n");
+    restart_status = system("./ising test_restart_input.tmp >> test_program_output.tmp 2>&1");
+    check(restart_status != 0 && last_sweep("test_data.tmp") == 8,
+          "restart rifiuta il vecchio formato senza aggiungere misure");
+
+    remove("test_data.tmp");
+    restart_status = system("./ising test_restart_input.tmp >> test_program_output.tmp");
+    check(restart_status == 0 && count_numeric_lines("test_data.tmp") == 2 &&
+          last_sweep("test_data.tmp") == 12,
+          "restart puo' continuare in un nuovo file dati");
+
     remove("test_first_input.tmp");
     remove("test_restart_input.tmp");
     remove("test_restart_config.tmp");
@@ -339,7 +345,8 @@ static void test_wolff_simulation(void)
         "config_file = test_wolff_config.tmp\n"
         "data_file = test_wolff_data.tmp\n";
     int status;
-    double g_zero;
+    int energy;
+    int magnetization;
     double g_min;
 
     remove("test_wolff_data.tmp");
@@ -351,9 +358,9 @@ static void test_wolff_simulation(void)
           "Wolff scrive le misure richieste");
     check(last_sweep("test_wolff_data.tmp") == 4,
           "Wolff mantiene la numerazione degli aggiornamenti");
-    check(first_structure_factors("test_wolff_data.tmp", &g_zero, &g_min) &&
-          g_zero == 27.0 && g_min < 1e-20,
-          "fattori di struttura corretti per il reticolo ordinato");
+    check(first_measurement("test_wolff_data.tmp", &energy, &magnetization, &g_min) &&
+          energy == -81 && abs(magnetization) == 27 && g_min < 1e-20,
+          "energia, magnetizzazione e g_min corretti per il reticolo ordinato");
 
     remove("test_wolff_input.tmp");
     remove("test_wolff_config.tmp");

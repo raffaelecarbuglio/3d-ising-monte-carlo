@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import gzip
 import math
 import sys
 
@@ -10,15 +11,16 @@ import numpy as np
 ENERGY = 1
 MAGNETIZATION = 2
 ABS_MAGNETIZATION = 3
-G_ZERO = 5
-G_MIN = 6
+G_ZERO = 4
+G_MIN = 5
 
 
 def read_data_file(filename):
     lattice_size = None
     beta = None
 
-    with open(filename, "r", encoding="utf-8") as file:
+    open_file = gzip.open if str(filename).endswith(".gz") else open
+    with open_file(filename, "rt", encoding="utf-8") as file:
         for line in file:
             line = line.strip()
             if line.startswith("# L ="):
@@ -49,9 +51,22 @@ def read_data_file(filename):
 
     if data.size == 0:
         raise ValueError("il file non contiene misure")
-    if data.shape[1] != 7:
+    if data.shape[1] == 4:
+        volume = lattice_size**3
+        energy = data[:, 1] / volume
+        magnetization = data[:, 2] / volume
+        g_zero = data[:, 2] ** 2 / volume
+        # In memoria usiamo E/V, m=M/V, |m|, G(0) e G(p_min).
+        data = np.column_stack((
+            data[:, 0], energy, magnetization, np.abs(magnetization),
+            g_zero, data[:, 3],
+        ))
+    elif data.shape[1] == 7:
+        # I vecchi file restano leggibili: scartiamo solo la diagnostica.
+        data = np.delete(data, 4, axis=1)
+    else:
         raise ValueError(
-            f"il file deve avere 7 colonne numeriche, ne ha {data.shape[1]}"
+            f"il file deve avere 4 o 7 colonne numeriche, ne ha {data.shape[1]}"
         )
 
     return lattice_size, beta, data
@@ -94,7 +109,7 @@ def calculate_observables(data, lattice_size, beta):
     xi = calculate_xi(data[:, G_ZERO], data[:, G_MIN], lattice_size)
 
     return {
-        # Il file contiene E/V; riportiamo e = -(E/V)/3.
+        # read_data_file restituisce E/V; riportiamo e = -(E/V)/3.
         "energy": -np.mean(data[:, ENERGY]) / 3.0,
         "magnetization": np.mean(data[:, MAGNETIZATION]),
         "abs_magnetization": np.mean(data[:, ABS_MAGNETIZATION]),
@@ -135,7 +150,7 @@ def block_jackknife(data, lattice_size, beta, block_size):
     used_data = data[:used_measurements]
     observables = calculate_observables(used_data, lattice_size, beta)
 
-    blocks = used_data.reshape(number_of_blocks, block_size, 7)
+    blocks = used_data.reshape(number_of_blocks, block_size, 6)
     block_energy_sums = np.sum(blocks[:, :, ENERGY], axis=1)
     block_abs_magnetization_sums = np.sum(
         blocks[:, :, ABS_MAGNETIZATION], axis=1

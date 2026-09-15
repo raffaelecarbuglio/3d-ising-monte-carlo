@@ -1,3 +1,4 @@
+import gzip
 import math
 import tempfile
 import unittest
@@ -22,7 +23,6 @@ def make_row(sweep, energy, magnetization, g_zero=4.0, g_min=1.0):
         energy,
         magnetization,
         abs(magnetization),
-        0.5,
         g_zero,
         g_min,
     ]
@@ -87,7 +87,7 @@ class AnalysisTests(unittest.TestCase):
 
         self.assertEqual(excluded, 1)
         self.assertEqual(observables["susceptibility"], 5.0)
-        self.assertEqual(observables["susceptibility"], np.mean(data[:used, 5]))
+        self.assertEqual(observables["susceptibility"], np.mean(data[:used, 4]))
         self.assertEqual(errors["susceptibility"], 3.0)
 
     def test_comments_in_the_middle_of_data_file(self):
@@ -106,8 +106,34 @@ class AnalysisTests(unittest.TestCase):
 
         self.assertEqual(lattice_size, 4)
         self.assertEqual(beta, 0.22)
-        self.assertEqual(data.shape, (2, 7))
+        self.assertEqual(data.shape, (2, 6))
         self.assertEqual(data[1, 0], 1.0)
+
+    def test_compact_and_legacy_files_give_same_analysis(self):
+        header = "# L = 4\n# beta = 0.22\n"
+        compact = header + "1 -64 32 1\n2 -128 -48 2\n3 -96 40 1.5\n4 -64 -32 1\n"
+        legacy = header + (
+            "1 -1 0.5 0.5 0.4 16 1\n"
+            "2 -2 -0.75 0.75 0.6 36 2\n"
+            "3 -1.5 0.625 0.625 0.5 25 1.5\n"
+            "4 -1 -0.5 0.5 0.4 16 1\n"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            old_file = Path(directory) / "old.dat"
+            old_file.write_text(legacy, encoding="utf-8")
+            size, beta, old_data = read_data_file(old_file)
+            expected = block_jackknife(old_data, size, beta, 2)
+            for contents in (compact, legacy):
+                for suffix in (".dat", ".dat.gz"):
+                    filename = Path(directory) / ("measurements" + suffix)
+                    open_file = gzip.open if suffix.endswith(".gz") else open
+                    with open_file(filename, "wt", encoding="utf-8") as file:
+                        file.write(contents)
+                    size, beta, data = read_data_file(filename)
+                    np.testing.assert_array_equal(data, old_data)
+                    self.assertEqual(block_jackknife(data, size, beta, 2), expected)
+            self.assertEqual(expected[0]["energy"], 1.375 / 3)
+            self.assertEqual(expected[0]["susceptibility"], 23.25)
 
     def test_block_jackknife_and_incomplete_tail(self):
         data = np.array(
