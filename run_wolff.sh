@@ -9,7 +9,7 @@ export LC_ALL=C
 # ============================================================
 # Usage:
 #
-#   ./run_beta_grid.sh path/to/valid_wolff_input.dat
+#   ./run_wolff.sh path/to/valid_wolff_input.dat
 #
 # The template must already be a valid input file for the
 # current version of the program and must contain:
