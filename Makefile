@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -std=c11 -O2 -Wall -Wextra -Wpedantic
+CFLAGS = -std=c11 -O3 -Wall -Wextra -Wpedantic
 LDLIBS = -lm
 PROGRAM_OBJECTS = main.o input.o ising.o rng.o
 TEST_OBJECTS = tests.o ising.o rng.o
