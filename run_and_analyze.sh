@@ -4,36 +4,39 @@ set -Eeuo pipefail
 export LC_ALL=C
 
 # Usage:
-#   ./run_and_analyze.sh ALGORITHM TEMPLATE B8 B16 B24 B32
+#   ./run_and_analyze.sh ALGORITHM TEMPLATE L:BLOCK_SIZE [L:BLOCK_SIZE ...]
 #
 # Examples:
-#   ./run_and_analyze.sh wolff input_wolff.dat 32 32 64 64
-#   ./run_and_analyze.sh metropolis input_metropolis.dat 128 256 256 512
+#   ./run_and_analyze.sh wolff input_wolff.dat 8:32 16:32 24:64 32:64
+#   ./run_and_analyze.sh metropolis input_metropolis.dat 48:256 64:512
+#
+# To use a different batch script, set RUN_SCRIPT. For example:
+#   RUN_SCRIPT=./run_wolff_large.sh \
+#       ./run_and_analyze.sh wolff input_wolff.dat 48:64 64:64
 
-if [[ $# -ne 6 ]]; then
-    echo "Usage: $0 ALGORITHM TEMPLATE B8 B16 B24 B32" >&2
+if [[ $# -lt 3 ]]; then
+    echo "Usage: $0 ALGORITHM TEMPLATE L:BLOCK_SIZE [L:BLOCK_SIZE ...]" >&2
     exit 2
 fi
 
 ALGORITHM="$1"
 TEMPLATE="$2"
-B8="$3"
-B16="$4"
-B24="$5"
-B32="$6"
+BLOCK_SPECS=("${@:3}")
 
 case "$ALGORITHM" in
     wolff)
-        RUN_SCRIPT="./run_wolff.sh"
+        DEFAULT_RUN_SCRIPT="./run_wolff.sh"
         ;;
     metropolis)
-        RUN_SCRIPT="./run_metropolis.sh"
+        DEFAULT_RUN_SCRIPT="./run_metropolis.sh"
         ;;
     *)
         echo "ERROR: ALGORITHM must be 'wolff' or 'metropolis'." >&2
         exit 2
         ;;
 esac
+
+RUN_SCRIPT="${RUN_SCRIPT:-$DEFAULT_RUN_SCRIPT}"
 
 if [[ ! -x "$RUN_SCRIPT" ]]; then
     echo "ERROR: '$RUN_SCRIPT' does not exist or is not executable." >&2
@@ -50,11 +53,22 @@ if [[ ! -f "$TEMPLATE" ]]; then
     exit 1
 fi
 
-for block in "$B8" "$B16" "$B24" "$B32"; do
-    if ! [[ "$block" =~ ^[1-9][0-9]*$ ]]; then
-        echo "ERROR: block sizes must be positive integers." >&2
+declare -A SEEN_L
+
+for specification in "${BLOCK_SPECS[@]}"; do
+    if [[ ! "$specification" =~ ^([1-9][0-9]*):([1-9][0-9]*)$ ]]; then
+        echo "ERROR: '$specification' must have the form L:BLOCK_SIZE with positive integers." >&2
         exit 1
     fi
+
+    L="${BASH_REMATCH[1]}"
+
+    if [[ -n "${SEEN_L[$L]+x}" ]]; then
+        echo "ERROR: block size for L=$L was specified more than once." >&2
+        exit 1
+    fi
+
+    SEEN_L[$L]=1
 done
 
 TMP_LOG=$(mktemp)
@@ -89,7 +103,7 @@ echo "Simulations completed successfully."
 echo "Starting analysis of: $RUN_DIR"
 echo
 
-./analyze_grid.sh "$RUN_DIR" "$B8" "$B16" "$B24" "$B32"
+./analyze_grid.sh "$RUN_DIR" "${BLOCK_SPECS[@]}"
 
 echo
 echo "========================================"

@@ -5,25 +5,22 @@ export LC_ALL=C
 
 # Usage:
 #
-#   ./analyze_beta_grid.sh RUN_DIR B8 B16 B24 B32
+#   ./analyze_grid.sh RUN_DIR L:BLOCK_SIZE [L:BLOCK_SIZE ...]
 #
-# Example:
+# Examples:
 #
-#   ./analyze_beta_grid.sh beta_runs_20260915_120000 32 32 64 64
+#   ./analyze_grid.sh beta_runs_20260915_120000 8:32 16:32 24:64 32:64
+#   ./analyze_grid.sh beta_runs_20260917_120000 48:64 64:64
 #
 # Works for both Wolff and Metropolis batches.
 
-if [[ $# -ne 5 ]]; then
-    echo "Usage: $0 RUN_DIR B8 B16 B24 B32" >&2
+if [[ $# -lt 2 ]]; then
+    echo "Usage: $0 RUN_DIR L:BLOCK_SIZE [L:BLOCK_SIZE ...]" >&2
     exit 2
 fi
 
 RUN_DIR="$1"
-
-B8="$2"
-B16="$3"
-B24="$4"
-B32="$5"
+shift
 
 RESULTS_DIR="$RUN_DIR/results"
 
@@ -56,13 +53,6 @@ if [[ ! -f "plot_u_vs_rxi.py" ]]; then
     exit 1
 fi
 
-for block in "$B8" "$B16" "$B24" "$B32"; do
-    if ! [[ "$block" =~ ^[1-9][0-9]*$ ]]; then
-        echo "ERROR: block sizes must be positive integers." >&2
-        exit 1
-    fi
-done
-
 
 # ============================================================
 # BLOCK SIZES
@@ -70,10 +60,22 @@ done
 
 declare -A BLOCK
 
-BLOCK[8]="$B8"
-BLOCK[16]="$B16"
-BLOCK[24]="$B24"
-BLOCK[32]="$B32"
+for specification in "$@"; do
+    if [[ ! "$specification" =~ ^([1-9][0-9]*):([1-9][0-9]*)$ ]]; then
+        echo "ERROR: '$specification' must have the form L:BLOCK_SIZE with positive integers." >&2
+        exit 1
+    fi
+
+    L="${BASH_REMATCH[1]}"
+    block="${BASH_REMATCH[2]}"
+
+    if [[ -n "${BLOCK[$L]+x}" ]]; then
+        echo "ERROR: block size for L=$L was specified more than once." >&2
+        exit 1
+    fi
+
+    BLOCK[$L]="$block"
+done
 
 
 # ============================================================
@@ -143,7 +145,6 @@ for f in "${DATA_FILES[@]}"; do
     fi
 
     successes=$((successes + 1))
-
 done
 
 
