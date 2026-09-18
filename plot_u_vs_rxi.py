@@ -26,21 +26,25 @@ def main():
             raise ValueError("gli errori devono essere non negativi")
 
         figure, axis = plt.subplots(figsize=(6.0, 4.5))
-        for lattice_size in np.unique(data[:, 0]):
+
+        for i, lattice_size in enumerate(np.unique(data[:, 0])):
             points = data[data[:, 0] == lattice_size]
             points = points[np.argsort(points[:, 2])]
+
             axis.errorbar(
                 points[:, 2], points[:, 4],
                 xerr=points[:, 3], yerr=points[:, 5],
-                marker="x", linestyle="none",
-                markersize=5.5, markeredgewidth=1.0,
-                elinewidth=0.8, capsize=2.5, capthick=0.8,
+                fmt="none",
+                color=f"C{i}",
+                elinewidth=0.9,
+                capsize=2.5,
+                capthick=0.8,
                 label=f"L={int(lattice_size)}",
             )
 
         axis.set_xlabel(r"$R_\xi$", fontsize=13)
         axis.set_ylabel(r"$U$", fontsize=13)
-        axis.tick_params(direction="in", top=True, right=True, labelsize=11)
+        axis.tick_params(direction="in", top=True, right=True)
         axis.legend(frameon=False, fontsize=10)
         figure.tight_layout()
 
