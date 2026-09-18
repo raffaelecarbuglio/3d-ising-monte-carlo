@@ -26,17 +26,14 @@ def main():
             raise ValueError("gli errori devono essere non negativi")
 
         figure, axis = plt.subplots(figsize=(6.0, 4.5))
-        markers = ["o", "s", "^", "v", "D", "P", "X", "<", ">", "p", "h", "*"]
-        for index, lattice_size in enumerate(np.unique(data[:, 0])):
+        for lattice_size in np.unique(data[:, 0]):
             points = data[data[:, 0] == lattice_size]
             points = points[np.argsort(points[:, 2])]
-            # Oltre i simboli disponibili, usa il valore di L come marcatore.
-            marker = markers[index] if index < len(markers) else f"${int(lattice_size)}$"
             axis.errorbar(
                 points[:, 2], points[:, 4],
                 xerr=points[:, 3], yerr=points[:, 5],
-                marker=marker, linestyle="none",
-                markersize=5.5, markeredgewidth=0.8,
+                marker="x", linestyle="none",
+                markersize=5.5, markeredgewidth=1.0,
                 elinewidth=0.8, capsize=2.5, capthick=0.8,
                 label=f"L={int(lattice_size)}",
             )
