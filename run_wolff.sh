@@ -212,10 +212,12 @@ echo \
 # ============================================================
 
 run_id=0
+expected_runs=0
 
 for range in "${ranges[@]}"; do
 
     read -r L beta_min beta_max npoints <<< "$range"
+    expected_runs=$((expected_runs + npoints))
 
     for ((i=0; i<npoints; i++)); do
 
@@ -279,8 +281,8 @@ done
 
 TOTAL_RUNS=${#RUN_NAMES[@]}
 
-if [[ "$TOTAL_RUNS" -ne 93 ]]; then
-    echo "ERROR: expected 93 runs, generated $TOTAL_RUNS." >&2
+if [[ "$TOTAL_RUNS" -ne "$expected_runs" ]]; then
+    echo "ERROR: expected $expected_runs runs from the beta grid, generated $TOTAL_RUNS." >&2
     exit 1
 fi
 
