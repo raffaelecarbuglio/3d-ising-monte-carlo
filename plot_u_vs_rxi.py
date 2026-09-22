@@ -25,7 +25,7 @@ def main():
         if np.any(data[:, 3] < 0) or np.any(data[:, 5] < 0):
             raise ValueError("gli errori devono essere non negativi")
 
-        figure, axis = plt.subplots(figsize=(6.0, 4.5))
+        figure, axis = plt.subplots(figsize=(6.3, 4.7))
 
         for i, lattice_size in enumerate(np.unique(data[:, 0])):
             points = data[data[:, 0] == lattice_size]
@@ -36,16 +36,25 @@ def main():
                 xerr=points[:, 3], yerr=points[:, 5],
                 fmt="none",
                 color=f"C{i}",
-                elinewidth=0.9,
-                capsize=2.5,
+                elinewidth=0.8,
+                capsize=2.0,
                 capthick=0.8,
-                label=f"L={int(lattice_size)}",
+                label=fr"$L={int(lattice_size)}$",
             )
 
         axis.set_xlabel(r"$R_\xi$", fontsize=13)
         axis.set_ylabel(r"$U$", fontsize=13)
-        axis.tick_params(direction="in", top=True, right=True)
-        axis.legend(frameon=False, fontsize=10)
+        axis.tick_params(
+            direction="in",
+            top=True,
+            right=True,
+            labelsize=11,
+        )
+        axis.legend(
+            frameon=False,
+            fontsize=10,
+            ncol=2,
+        )
         figure.tight_layout()
 
         output_path = Path(arguments.output)
