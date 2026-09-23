@@ -7,9 +7,9 @@ import numpy as np
 from fit_scaling import (
     OMEGA,
     asymptotic_curve,
-    bootstrap_point,
+    bootstrap_pair,
     design_matrix,
-    fit_polynomials,
+    fit,
     read_block_file,
 )
 
@@ -29,53 +29,28 @@ class FitScalingTests(unittest.TestCase):
         ))
         np.testing.assert_allclose(matrix, expected)
 
-    def test_weighted_fit_recovers_exact_coefficients(self):
-        r_xi = np.tile(
-            np.linspace(0.3, 1.0, 10), 2
-        )
+    def test_fit_recovers_exact_coefficients(self):
+        r_xi = np.tile(np.linspace(0.3, 1.0, 10), 2)
         sizes = np.repeat([16.0, 32.0], 10)
-        coefficients = np.array([
-            1.2, -0.4, 0.3, 0.8, -0.2
-        ])
-        matrix = design_matrix(r_xi, sizes, 2, 1)
-        binder = matrix @ coefficients
-        errors = np.full(len(r_xi), 0.01)
+        expected = np.array([1.2, -0.4, 0.3, 0.8, -0.2])
+        u = design_matrix(r_xi, sizes, 2, 1) @ expected
+        err_u = np.full(len(u), 0.01)
 
-        fitted, chi2, dof = fit_polynomials(
-            r_xi,
-            binder,
-            errors,
-            sizes,
-            2,
-            1,
+        coefficients, chi2, dof = fit(
+            r_xi, u, err_u, sizes, 2, 1
         )
 
-        np.testing.assert_allclose(
-            fitted,
-            coefficients,
-            rtol=1e-11,
-            atol=1e-11,
-        )
+        np.testing.assert_allclose(coefficients, expected)
         self.assertAlmostEqual(chi2, 0.0, places=20)
-        self.assertEqual(
-            dof, len(r_xi) - len(coefficients)
-        )
-        np.testing.assert_allclose(
-            asymptotic_curve(
-                fitted, np.array([0.4]), 2
-            ),
-            (
-                coefficients[0]
-                + coefficients[1] * 0.4
-                + coefficients[2] * 0.4**2
-            ),
+        self.assertEqual(dof, len(u) - len(expected))
+        self.assertAlmostEqual(
+            asymptotic_curve(coefficients, np.array([0.4]), 2)[0],
+            expected[0] + expected[1] * 0.4 + expected[2] * 0.4**2,
         )
 
-    def test_read_block_file_and_paired_bootstrap(self):
+    def test_read_blocks_and_reproducible_bootstrap_pair(self):
         contents = """# L = 8
 # beta = 0.22
-# block_size = 2
-# number_of_blocks = 4
 # Rxi = 0.5
 # err_Rxi = 0.01
 # U = 1.2
@@ -87,33 +62,16 @@ class FitScalingTests(unittest.TestCase):
 7.0 1.0 1.3 2.0
 """
         with tempfile.TemporaryDirectory() as directory:
-            filename = (
-                Path(directory) / "sample_blocks.txt"
-            )
-            filename.write_text(
-                contents, encoding="utf-8"
-            )
+            filename = Path(directory) / "sample_blocks.txt"
+            filename.write_text(contents, encoding="utf-8")
             point = read_block_file(filename)
 
-        self.assertEqual(point["L"], 8)
-        self.assertEqual(
-            point["blocks"].shape, (4, 4)
-        )
+        first = bootstrap_pair(point, np.random.default_rng(123))
+        second = bootstrap_pair(point, np.random.default_rng(123))
 
-        first_rng = np.random.default_rng(123)
-        second_rng = np.random.default_rng(123)
-        first = bootstrap_point(
-            point, 20, first_rng
-        )
-        second = bootstrap_point(
-            point, 20, second_rng
-        )
-        np.testing.assert_allclose(
-            first[0], second[0]
-        )
-        np.testing.assert_allclose(
-            first[1], second[1]
-        )
+        self.assertEqual(point["L"], 8)
+        self.assertEqual(point["blocks"].shape, (4, 4))
+        np.testing.assert_allclose(first, second)
 
 
 if __name__ == "__main__":
