@@ -194,6 +194,18 @@ Gli errori di energia, magnetizzazione assoluta, Binder, suscettivita', `xi` e
 vengono ricalcolati da zero in ogni campione jackknife, perche' sono funzioni
 non lineari delle medie.
 
+Ogni esecuzione di `analyze.py` salva anche, senza opzioni aggiuntive, un file
+`*_blocks.txt` accanto al file delle misure. Il file contiene una riga per
+blocco completo con le medie di `g_zero`, `g_min`, `m^2` e `m^4`, piu'
+nell'intestazione `L`, `beta`, la dimensione del blocco e i valori finali di
+`R_xi` e `U` con i loro errori. Questi dati sono sufficienti per ricostruire
+insieme `R_xi` e `U` in ogni replica bootstrap, preservando automaticamente
+la loro correlazione. Rieseguire l'analisi con una nuova dimensione del blocco
+sovrascrive il corrispondente file `*_blocks.txt`.
+
+Il percorso puo' essere cambiato esplicitamente con `--blocks-output`, ma il
+salvataggio dei blocchi avviene sempre.
+
 Vengono usati soltanto blocchi contigui completi. Le eventuali misure finali
 che non formano un blocco completo sono escluse e il loro numero viene
 stampato. Servono almeno due blocchi completi. Se l'argomento della radice di
@@ -236,6 +248,48 @@ Per scegliere un altro percorso usa `--output plots/mio_grafico.png`.
 Per salvare senza interfaccia grafica:
 
     MPLBACKEND=Agg python3 plot_u_vs_rxi.py summary.txt
+
+### Fit globale U(R_xi, L)
+
+`fit_scaling.py` esegue il fit
+
+    U(R_xi, L) = sum_k b_k R_xi^k + L^(-omega) sum_k c_k R_xi^k
+
+con `omega = 0.8295` fissato al valore di letteratura per Ising 3D. Il fit e'
+lineare nei coefficienti e viene risolto con minimi quadrati pesati usando gli
+errori di `U`.
+
+Lo script legge direttamente i file `*_blocks.txt` prodotti da `analyze.py`.
+Per ogni replica bootstrap ricampiona con rimpiazzo le righe di ciascuna
+simulazione e usa gli stessi blocchi per ricostruire sia `R_xi` sia `U`.
+La correlazione tra le due osservabili viene quindi mantenuta senza dover
+calcolare una matrice di covarianza esplicita.
+
+Un esempio e':
+
+    MPLBACKEND=Agg python3 fit_scaling.py beta_runs_L16-24-32 beta_runs_L48-64 \
+        --sizes 16 24 32 48 64 \
+        --degree-main 6 \
+        --degree-correction 3 \
+        --bootstrap 2000 \
+        --output-prefix scaling_fit
+
+Se `--sizes` e' omesso vengono usate tutte le taglie trovate. I default per i
+gradi sono 6 per la curva asintotica e 3 per la correzione. L'intervallo
+predefinito e' `0.30 <= R_xi <= 1.00`. Per studiare la stabilita' del fit basta
+rieseguire lo stesso comando cambiando `--sizes`, `--degree-main` oppure
+`--degree-correction`: non serve modificare il codice.
+
+Gli output sono:
+
+- `<prefix>_summary.txt`: parametri del fit, errori bootstrap, chi2/dof e
+  impostazioni usate;
+- `<prefix>_curve.txt`: curva asintotica centrale e banda bootstrap puntuale
+  al 68%;
+- `<prefix>.png` e `<prefix>.pdf`: grafico dei dati, curva e banda.
+
+Durante lo sviluppo si puo' usare un numero piccolo di repliche, ad esempio
+`--bootstrap 200`; per il risultato finale e' opportuno aumentarlo.
 
 ## File di configurazione
 

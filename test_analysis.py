@@ -8,12 +8,15 @@ import numpy as np
 
 from analyze import (
     block_jackknife,
+    calculate_block_averages,
     calculate_binder,
     calculate_observables,
     calculate_susceptibility,
     calculate_xi,
+    default_blocks_filename,
     jackknife_error,
     read_data_file,
+    save_blocks,
 )
 
 
@@ -179,6 +182,61 @@ class AnalysisTests(unittest.TestCase):
                 for name in optimized[1]:
                     self.assertAlmostEqual(optimized[1][name], brute_force[1][name])
                 self.assertEqual(optimized[2:], brute_force[2:])
+
+    def test_block_averages_contain_primary_quantities(self):
+        data = np.array([
+            make_row(0, -1.0, 1.0, 4.0, 1.0),
+            make_row(1, -1.0, -1.0, 6.0, 3.0),
+            make_row(2, -1.0, 2.0, 8.0, 2.0),
+            make_row(3, -1.0, -2.0, 10.0, 4.0),
+            make_row(4, -1.0, 100.0, 100.0, 100.0),
+        ])
+
+        block_averages = calculate_block_averages(data, 2)
+
+        expected = np.array([
+            [5.0, 2.0, 1.0, 1.0],
+            [9.0, 3.0, 4.0, 16.0],
+        ])
+        np.testing.assert_allclose(block_averages, expected)
+
+    def test_default_blocks_filename(self):
+        self.assertEqual(
+            default_blocks_filename("data/L8_data.dat"),
+            "data/L8_data_blocks.txt",
+        )
+        self.assertEqual(
+            default_blocks_filename("data/L8_data.dat.gz"),
+            "data/L8_data_blocks.txt",
+        )
+
+    def test_save_blocks_writes_metadata_and_values(self):
+        block_averages = np.array([
+            [4.0, 1.0, 0.25, 0.0625],
+            [5.0, 2.0, 0.5, 0.25],
+        ])
+        observables = {"r_xi": 0.6, "binder": 1.2}
+        errors = {"r_xi": 0.01, "binder": 0.02}
+
+        with tempfile.TemporaryDirectory() as directory:
+            filename = Path(directory) / "blocks.txt"
+            save_blocks(
+                filename,
+                16,
+                0.22,
+                32,
+                block_averages,
+                observables,
+                errors,
+            )
+            contents = filename.read_text(encoding="utf-8")
+            loaded = np.loadtxt(filename, comments="#")
+
+        self.assertIn("# L = 16", contents)
+        self.assertIn("# block_size = 32", contents)
+        self.assertIn("# number_of_blocks = 2", contents)
+        self.assertIn("# columns: g_zero g_min m2 m4", contents)
+        np.testing.assert_allclose(loaded, block_averages)
 
     def test_negative_xi_radicand_is_an_error(self):
         with self.assertRaisesRegex(ValueError, "negativo"):
