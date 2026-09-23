@@ -83,6 +83,7 @@ done
 # ============================================================
 
 rm -f "$SUMMARY_FILE" "$LOG_FILE"
+rm -f "$RESULTS_DIR"/*_blocks.txt
 
 shopt -s nullglob
 
@@ -206,6 +207,9 @@ echo "  $SUMMARY_FILE"
 echo
 echo "Scaling plot:"
 echo "  $PLOT_FILE"
+echo
+echo "Block averages:"
+echo "  $RESULTS_DIR/*_blocks.txt"
 echo
 echo "Full analysis log:"
 echo "  $LOG_FILE"
