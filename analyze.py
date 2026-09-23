@@ -213,6 +213,51 @@ def block_jackknife(data, lattice_size, beta, block_size):
     return observables, errors, number_of_blocks, used_measurements, excluded_measurements
 
 
+def calculate_block_averages(data, block_size):
+    number_of_blocks = len(data) // block_size
+    used_measurements = number_of_blocks * block_size
+    used_data = data[:used_measurements]
+    blocks = used_data.reshape(number_of_blocks, block_size, 6)
+
+    return np.column_stack((
+        np.mean(blocks[:, :, G_ZERO], axis=1),
+        np.mean(blocks[:, :, G_MIN], axis=1),
+        np.mean(blocks[:, :, MAGNETIZATION] ** 2, axis=1),
+        np.mean(blocks[:, :, MAGNETIZATION] ** 4, axis=1),
+    ))
+
+
+def default_blocks_filename(filename):
+    path = str(filename)
+    if path.endswith(".gz"):
+        path = path[:-3]
+    if path.endswith(".dat"):
+        path = path[:-4]
+    return path + "_blocks.txt"
+
+
+def save_blocks(
+    filename,
+    lattice_size,
+    beta,
+    block_size,
+    block_averages,
+    observables,
+    errors,
+):
+    with open(filename, "w", encoding="utf-8") as file:
+        file.write(f"# L = {lattice_size}\n")
+        file.write(f"# beta = {beta:.17g}\n")
+        file.write(f"# block_size = {block_size}\n")
+        file.write(f"# number_of_blocks = {len(block_averages)}\n")
+        file.write(f"# Rxi = {observables['r_xi']:.17g}\n")
+        file.write(f"# err_Rxi = {errors['r_xi']:.17g}\n")
+        file.write(f"# U = {observables['binder']:.17g}\n")
+        file.write(f"# err_U = {errors['binder']:.17g}\n")
+        file.write("# columns: g_zero g_min m2 m4\n")
+        np.savetxt(file, block_averages, fmt="%.17g")
+
+
 def print_results(
     filename,
     lattice_size,
@@ -269,6 +314,13 @@ def main():
         required=True,
         help="numero di misure in ogni blocco jackknife",
     )
+    parser.add_argument(
+        "--blocks-output",
+        help=(
+            "file per le medie dei blocchi; se omesso usa "
+            "<file_misure>_blocks.txt"
+        ),
+    )
     arguments = parser.parse_args()
 
     try:
@@ -277,6 +329,23 @@ def main():
             data, lattice_size, beta, arguments.block_size
         )
         observables, errors, blocks, used, excluded = results
+        block_averages = calculate_block_averages(
+            data, arguments.block_size
+        )
+        blocks_output = (
+            arguments.blocks_output
+            if arguments.blocks_output is not None
+            else default_blocks_filename(arguments.filename)
+        )
+        save_blocks(
+            blocks_output,
+            lattice_size,
+            beta,
+            arguments.block_size,
+            block_averages,
+            observables,
+            errors,
+        )
         if arguments.summary_output is not None:
             save_summary(
                 arguments.summary_output, lattice_size, beta, observables, errors
@@ -285,6 +354,8 @@ def main():
         print(f"Errore: {error}", file=sys.stderr)
         return 1
 
+    print(f"block averages: {blocks_output}")
+    print()
     print_results(
         arguments.filename,
         lattice_size,
