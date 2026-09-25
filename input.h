@@ -17,6 +17,7 @@ typedef enum {
 typedef struct {
     int L;
     double beta;
+    double sigma;
     int n_therm;
     int n_sweeps;
     int measure_every;

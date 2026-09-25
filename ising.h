@@ -18,7 +18,7 @@ void ising_fill_ordered(IsingLattice *lattice);
 void ising_fill_random(IsingLattice *lattice, Pcg32 *rng);
 int ising_total_energy(const IsingLattice *lattice);
 int ising_total_magnetization(const IsingLattice *lattice);
-int ising_metropolis_sweep(IsingLattice *lattice, double beta, Pcg32 *rng);
+int ising_metropolis_sweep(IsingLattice *lattice, double beta, double sigma, Pcg32 *rng);
 int ising_wolff_update(IsingLattice *lattice, double probability, Pcg32 *rng,
                        int *cluster, int *in_cluster);
 int ising_save_configuration(const char *filename, const IsingLattice *lattice,

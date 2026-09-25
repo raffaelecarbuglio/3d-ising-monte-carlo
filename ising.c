@@ -128,7 +128,7 @@ int ising_total_magnetization(const IsingLattice *lattice)
     return magnetization;
 }
 
-int ising_metropolis_sweep(IsingLattice *lattice, double beta, Pcg32 *rng)
+int ising_metropolis_sweep(IsingLattice *lattice, double beta, double sigma, Pcg32 *rng)
 {
     double acceptance_probability[4];
     int accepted = 0;
@@ -146,14 +146,23 @@ int ising_metropolis_sweep(IsingLattice *lattice, double beta, Pcg32 *rng)
             for (x = 0; x < lattice->L; x++) {
                 int index = ising_index(lattice, x, y, z);
                 int delta_energy;
+                int accept;
 
                 /* Per un flip, delta E = 2 s_i moltiplicato per i sei vicini. */
                 delta_energy = 2 * lattice->spins[index]
                              * ising_neighbor_sum(lattice, x, y, z);
 
-                /* Metropolis: i flip favorevoli sono sempre accettati. */
-                if (delta_energy <= 0 ||
-                    pcg32_uniform(rng) < acceptance_probability[delta_energy / 4]) {
+                if (sigma > 0.0) {
+                    /* Il rumore agisce su ogni tentativo, anche per delta E <= 0. */
+                    double noisy_delta = delta_energy + sigma * pcg32_gaussian(rng);
+                    accept = noisy_delta <= 0.0 ||
+                             pcg32_uniform(rng) < exp(-beta * noisy_delta);
+                } else {
+                    /* Caso pulito: stesse probabilita' e stessa sequenza RNG. */
+                    accept = delta_energy <= 0 ||
+                             pcg32_uniform(rng) < acceptance_probability[delta_energy / 4];
+                }
+                if (accept) {
                     lattice->spins[index] = -lattice->spins[index];
                     accepted++;
                 }
