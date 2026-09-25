@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include "ising.h"
@@ -168,7 +169,7 @@ static void test_lattice(void)
 
     pcg32_seed(&rng, 123);
     ising_fill_ordered(&lattice);
-    check(ising_metropolis_sweep(&lattice, 0.0, &rng) == lattice.n_spins,
+    check(ising_metropolis_sweep(&lattice, 0.0, 0.0, &rng) == lattice.n_spins,
           "a beta=0 ogni sito e' aggiornato una volta");
 
     for (i = 0; i < lattice.n_spins; i++) {
@@ -183,7 +184,7 @@ static void test_lattice(void)
     ising_destroy(&lattice);
 }
 
-static void test_reproducibility(void)
+static void test_reproducibility(double sigma)
 {
     IsingLattice a;
     IsingLattice b;
@@ -199,14 +200,44 @@ static void test_reproducibility(void)
     pcg32_seed(&rng_b, 9876);
 
     for (sweep = 0; sweep < 8; sweep++) {
-        ising_metropolis_sweep(&a, 0.22, &rng_a);
-        ising_metropolis_sweep(&b, 0.22, &rng_b);
+        ising_metropolis_sweep(&a, 0.22, sigma, &rng_a);
+        ising_metropolis_sweep(&b, 0.22, sigma, &rng_b);
     }
 
     check(same_spins(&a, &b),
           "stessa configurazione e seed: stesso risultato");
     ising_destroy(&a);
     ising_destroy(&b);
+}
+
+static void test_gaussian(void)
+{
+    Pcg32 rng, reference;
+    double sum = 0.0, sum_squared = 0.0, sum_neighbors = 0.0;
+    double previous = 0.0;
+    int i;
+    const int n = 200000;
+
+    pcg32_seed(&rng, 31415);
+    for (i = 0; i < n; i++) {
+        double value = pcg32_gaussian(&rng);
+        sum += value;
+        sum_squared += value * value;
+        sum_neighbors += previous * value;
+        previous = value;
+    }
+    check(fabs(sum / n) < 0.015, "gaussiana: media vicina a zero");
+    check(fabs(sum_squared / n - 1.0) < 0.025,
+          "gaussiana: secondo momento vicino a uno");
+    check(fabs(sum_neighbors / n) < 0.015,
+          "gaussiana: campioni consecutivi non correlati");
+
+    /* Il seed deve cancellare anche il secondo campione in attesa. */
+    pcg32_gaussian(&rng);
+    pcg32_seed(&rng, 42);
+    pcg32_seed(&reference, 42);
+    check(pcg32_gaussian(&rng) == pcg32_gaussian(&reference),
+          "nuovo seed azzera la cache gaussiana");
 }
 
 static void test_wolff(void)
@@ -371,7 +402,9 @@ static void test_wolff_simulation(void)
 int main(void)
 {
     test_lattice();
-    test_reproducibility();
+    test_reproducibility(0.0);
+    test_reproducibility(0.5);
+    test_gaussian();
     test_wolff();
     test_save_load();
     test_restart();

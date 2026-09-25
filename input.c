@@ -1,5 +1,6 @@
 #include "input.h"
 #include <stdio.h>
+#include <math.h>
 #include <string.h>
 
 int input_read(const char *filename, SimulationParameters *parameters)
@@ -8,6 +9,7 @@ int input_read(const char *filename, SimulationParameters *parameters)
     char start[16];
     char algorithm[16];
     int fields_read = 0;
+    char extra;
 
     file = fopen(filename, "r");
     if (file == NULL) {
@@ -56,6 +58,24 @@ int input_read(const char *filename, SimulationParameters *parameters)
     if (fscanf(file, "\nconfig_file = %511s", parameters->config_file) != 1 ||
         fscanf(file, "\ndata_file = %511s", parameters->data_file) != 1) {
         fprintf(stderr, "Errore: mancano config_file o data_file.\n");
+        fclose(file);
+        return 0;
+    }
+
+    /* Campo finale opzionale: gli input precedenti restano validi. */
+    parameters->sigma = 0.0;
+    if (fscanf(file, " %c", &extra) == 1) {
+        ungetc(extra, file);
+        if (fscanf(file, "sigma = %lf", &parameters->sigma) != 1 ||
+            fscanf(file, " %c", &extra) == 1) {
+            fprintf(stderr, "Errore: atteso sigma = valore alla fine dell'input.\n");
+            fclose(file);
+            return 0;
+        }
+    }
+    if (!isfinite(parameters->sigma) || parameters->sigma < 0.0 ||
+        (parameters->algorithm == ALGORITHM_WOLFF && parameters->sigma != 0.0)) {
+        fprintf(stderr, "Errore: sigma deve essere finito e >= 0; con Wolff deve essere 0.\n");
         fclose(file);
         return 0;
     }

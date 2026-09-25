@@ -310,3 +310,34 @@ Il programma segnala eventuali errori di apertura, scrittura o chiusura del file
 
 I percorsi sono relativi alla directory dalla quale si avvia il programma. Il
 progetto e' seriale e non usa librerie esterne.
+
+
+## Rumore gaussiano in Metropolis
+
+Aggiungere **alla fine dell'input**, dopo `data_file`:
+
+```text
+sigma = 0.5
+```
+
+Per ogni tentativo di flip si usa `delta_E + sigma * G`, con un nuovo
+`G ~ N(0,1)`, nella probabilita' di accettazione. `sigma` e' la deviazione
+standard del rumore aggiunto direttamente a delta E (una sola gaussiana).
+Energia e magnetizzazione misurate restano quelle degli spin, senza rumore.
+
+Se il campo manca, `sigma = 0`: stessi aggiornamenti e stessa sequenza casuale
+del codice pulito. Sono ammessi solo valori finiti e non negativi;
+Wolff richiede `sigma = 0`. Il valore viene scritto nel log, nell'intestazione
+dati e nel commento di restart. Non si possono aggiungere dati con sigma
+diverso allo stesso file; per cambiare sigma usare un nuovo `data_file`.
+Come prima, il restart rilegge gli spin ma reinizializza il generatore dal seed.
+
+Per una griglia Metropolis, `SIGMA` imposta lo stesso valore in tutti gli input
+(e prevale sul template; se omesso vale 0):
+
+```bash
+SIGMA=0.5 ./run_metropolis.sh inputs/input_example.dat
+```
+
+Gli intervalli beta dello script restano quelli puliti: prima delle produzioni
+con rumore vanno verificati con brevi simulazioni pilota.

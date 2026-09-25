@@ -16,6 +16,7 @@ static FILE *open_data_file(const SimulationParameters *p, int initial_sweep)
         char line[512];
         int has_contents = 0;
         int same_columns = 0;
+        double old_sigma = 0.0; /* I file precedenti erano senza rumore. */
 
         file = fopen(p->data_file, "a+");
         if (file == NULL) {
@@ -25,6 +26,7 @@ static FILE *open_data_file(const SimulationParameters *p, int initial_sweep)
         rewind(file);
         while (fgets(line, sizeof(line), file) != NULL) {
             has_contents = 1;
+            sscanf(line, "# sigma = %lf", &old_sigma);
             if (strcmp(line, columns) == 0) {
                 same_columns = 1;
                 break;
@@ -33,9 +35,9 @@ static FILE *open_data_file(const SimulationParameters *p, int initial_sweep)
                 break;
             }
         }
-        if (ferror(file) || (has_contents && !same_columns)) {
+        if (ferror(file) || (has_contents && (!same_columns || old_sigma != p->sigma))) {
             fprintf(stderr,
-                    "Errore: formato dati incompatibile in '%s'; "
+                    "Errore: formato dati o sigma incompatibile in '%s'; "
                     "usare un nuovo data_file per il restart.\n", p->data_file);
             fclose(file);
             return NULL;
@@ -49,11 +51,11 @@ static FILE *open_data_file(const SimulationParameters *p, int initial_sweep)
                         "#\n"
                         "# restart: initial_sweep=%d beta=%.17g "
                         "seed=%d n_therm=%d "
-                        "n_sweeps=%d measure_every=%d algorithm=%s\n"
+                        "n_sweeps=%d measure_every=%d algorithm=%s sigma=%.17g\n"
                         "# config_file=%s\n",
                         initial_sweep, p->beta, p->seed, p->n_therm,
                         p->n_sweeps, p->measure_every,
-                        algorithm_name(p->algorithm), p->config_file) < 0) {
+                        algorithm_name(p->algorithm), p->sigma, p->config_file) < 0) {
                 fclose(file);
                 return NULL;
             }
@@ -76,13 +78,14 @@ static FILE *open_data_file(const SimulationParameters *p, int initial_sweep)
                 "# seed = %d\n"
                 "# start = %s\n"
                 "# algorithm = %s\n"
+                "# sigma = %.17g\n"
                 "# n_therm = %d\n"
                 "# n_sweeps = %d\n"
                 "# measure_every = %d\n"
                 "# config_file = %s\n"
                 "%s",
                 p->L, p->beta, p->seed, start_mode_name(p->start),
-                algorithm_name(p->algorithm),
+                algorithm_name(p->algorithm), p->sigma,
                 p->n_therm, p->n_sweeps, p->measure_every,
                 p->config_file, columns) < 0) {
         fclose(file);
@@ -203,14 +206,14 @@ static int run_simulation(const SimulationParameters *p)
         return 0;
     }
 
-    printf("Reticolo %d x %d x %d, start=%s, algorithm=%s, seed=%d\n",
+    printf("Reticolo %d x %d x %d, start=%s, algorithm=%s, seed=%d, sigma=%.17g\n",
            p->L, p->L, p->L, start_mode_name(p->start),
-           algorithm_name(p->algorithm), p->seed);
+           algorithm_name(p->algorithm), p->seed, p->sigma);
 
     /* 5. Termalizzazione: questi sweep non producono misure. */
     for (sweep = 0; sweep < p->n_therm; sweep++) {
         if (p->algorithm == ALGORITHM_METROPOLIS) {
-            ising_metropolis_sweep(&lattice, p->beta, &rng);
+            ising_metropolis_sweep(&lattice, p->beta, p->sigma, &rng);
         } else {
             ising_wolff_update(&lattice, wolff_probability, &rng,
                                cluster, in_cluster);
@@ -220,7 +223,7 @@ static int run_simulation(const SimulationParameters *p)
     /* 6. Produzione e scrittura periodica delle misure. */
     for (sweep = 1; sweep <= p->n_sweeps; sweep++) {
         if (p->algorithm == ALGORITHM_METROPOLIS) {
-            ising_metropolis_sweep(&lattice, p->beta, &rng);
+            ising_metropolis_sweep(&lattice, p->beta, p->sigma, &rng);
         } else {
             ising_wolff_update(&lattice, wolff_probability,
                                &rng, cluster, in_cluster);

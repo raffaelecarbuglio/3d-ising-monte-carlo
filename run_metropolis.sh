@@ -4,7 +4,7 @@ set -Eeuo pipefail
 export LC_ALL=C
 
 # Usage:
-#   ./run_beta_grid_metropolis.sh path/to/valid_metropolis_input.dat
+#   ./run_metropolis.sh path/to/valid_metropolis_input.dat
 
 EXECUTABLE="${EXECUTABLE:-./ising}"
 TEMPLATE="${1:-}"
@@ -16,6 +16,7 @@ N_SWEEPS="${N_SWEEPS:-1000000}"
 MEASURE_EVERY="${MEASURE_EVERY:-10}"
 
 BASE_SEED="${BASE_SEED:-200000}"
+SIGMA="${SIGMA:-0.0}"
 
 ranges=(
     "8   0.206195  0.229220  33"
@@ -185,6 +186,9 @@ for range in "${ranges[@]}"; do
         log_file="$RESULT_DIR/${name}.log"
 
         cp -- "$TEMPLATE" "$input_file"
+        # sigma e' l'ultimo campo; SIGMA vale per tutta la griglia.
+        sed -i '/^sigma[[:space:]]*=/d' "$input_file"
+        printf '\nsigma = %s\n' "$SIGMA" >> "$input_file"
 
         replace_field "$input_file" L "$L"
         replace_field "$input_file" beta "$beta"
@@ -223,7 +227,7 @@ if [[ "$TOTAL_RUNS" -ne "$expected_runs" ]]; then
     exit 1
 fi
 
-echo "Prepared $TOTAL_RUNS Metropolis input files."
+echo "Prepared $TOTAL_RUNS Metropolis input files (sigma=$SIGMA)."
 echo "Batch directory: $RUN_DIR"
 echo "Maximum simultaneous jobs: $MAX_JOBS"
 echo
