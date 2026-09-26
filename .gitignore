@@ -8,3 +8,14 @@ example_data.dat
 data/*
 !data/.gitkeep
 *.log
+
+# Local/private files
+.env
+.env.*
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+credentials*
+secrets*
