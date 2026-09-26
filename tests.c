@@ -240,6 +240,66 @@ static void test_gaussian(void)
           "nuovo seed azzera la cache gaussiana");
 }
 
+/* Quadratura indipendente della regola originale, separata nel punto angoloso. */
+static double integrated_acceptance(int d, double beta, double sigma)
+{
+    double edges[3] = {-12.0, fmax(-12.0, fmin(12.0, -d / sigma)), 12.0};
+    double result = 0.0;
+    const int n = 8000;
+    for (int part = 0; part < 2; part++) {
+        double h = (edges[part + 1] - edges[part]) / n;
+        for (int i = 0; i <= n; i++) {
+            double g = edges[part] + i * h;
+            double delta = d + sigma * g;
+            double value = exp(-0.5 * g * g) / sqrt(2.0 * acos(-1.0));
+            if (delta > 0.0) value *= exp(-beta * delta);
+            result += h / 3.0 * (i == 0 || i == n ? 1 : (i % 2 ? 4 : 2)) * value;
+        }
+    }
+    return result;
+}
+
+static void test_noisy_acceptance(void)
+{
+    const double parameters[][2] = {{0.0, 0.5}, {0.221654, 0.5},
+        {0.4, 4.0}, {1.0, 0.01}, {1.0, 40.0}};
+    int accurate = 1, sweep_ok = 1, limits_ok = 1;
+    IsingLattice lattice;
+    ising_create(&lattice, 3);
+    /* I sei vicini del primo sito per L=3. */
+    const int neighbors[6] = {2, 1, 6, 3, 18, 9};
+    for (int k = 0; k < 5; k++) {
+        double beta = parameters[k][0], sigma = parameters[k][1];
+        for (int j = 0; j < 7; j++) {
+            int d = 4 * (j - 3);
+            double probability = ising_noisy_acceptance(d, beta, sigma);
+            double reference = integrated_acceptance(d, beta, sigma);
+            accurate &= isfinite(probability) && fabs(probability - reference) < 1e-9;
+            /* Il primo flip verifica anche indice della tabella e cambio parametri. */
+            for (int seed = 0; seed < 100; seed++) {
+                Pcg32 rng, expected_rng;
+                ising_fill_ordered(&lattice);
+                for (int n = 0; n < 6 - j; n++) lattice.spins[neighbors[n]] = -1;
+                pcg32_seed(&rng, seed);
+                pcg32_seed(&expected_rng, seed);
+                int flip = beta == 0.0 || pcg32_uniform(&expected_rng) < reference;
+                ising_metropolis_sweep(&lattice, beta, sigma, &rng);
+                sweep_ok &= lattice.spins[0] == (flip ? -1 : 1);
+            }
+        }
+    }
+    for (int d = -12; d <= 12; d += 4) {
+        double clean = d <= 0 ? 1.0 : exp(-0.22 * d);
+        limits_ok &= ising_noisy_acceptance(d, 0.22, 0.0) == clean;
+        limits_ok &= fabs(ising_noisy_acceptance(d, 0.22, 1e-300) - clean) < 1e-14;
+        limits_ok &= fabs(ising_noisy_acceptance(d, 0.22, 1e300) - 0.5) < 1e-14;
+    }
+    check(accurate, "accettazione mediata: accordo con quadratura per tutti i delta E");
+    check(sweep_ok, "sweep rumoroso: tabella, indici e aggiornamento parametri corretti");
+    check(limits_ok, "accettazione mediata: limiti pulito, rumore piccolo e grande");
+    ising_destroy(&lattice);
+}
+
 static void test_wolff(void)
 {
     IsingLattice lattice;
@@ -405,6 +465,7 @@ int main(void)
     test_reproducibility(0.0);
     test_reproducibility(0.5);
     test_gaussian();
+    test_noisy_acceptance();
     test_wolff();
     test_save_load();
     test_restart();
