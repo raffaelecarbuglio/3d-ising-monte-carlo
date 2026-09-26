@@ -128,9 +128,50 @@ int ising_total_magnetization(const IsingLattice *lattice)
     return magnetization;
 }
 
+/* exp(x*x) erfc(x), per x >= 0, senza overflow nella coda. */
+static double scaled_erfc(double x)
+{
+    if (x < 26.0) {
+        return exp(x * x) * erfc(x);
+    }
+    double term = 1.0, sum = 1.0;
+    double inverse_square = (1.0 / x) * (1.0 / x);
+    for (int k = 1; k <= 8; k++) {
+        term *= -(2.0 * k - 1.0) * 0.5 * inverse_square;
+        sum += term;
+    }
+    return sum / (sqrt(acos(-1.0)) * x);
+}
+
+double ising_noisy_acceptance(int delta_energy, double beta, double sigma)
+{
+    if (beta == 0.0) {
+        return 1.0;
+    }
+    if (sigma == 0.0) {
+        return delta_energy <= 0 ? 1.0 : exp(-beta * delta_energy);
+    }
+    double a = delta_energy / sigma;
+    double b = beta * sigma;
+    double z = (b - a) / sqrt(2.0);
+    double tail;
+
+    /* Media di min(1, exp(-beta*(delta_energy + sigma*G))).
+       Per z > 0 riscriviamo il prodotto exp(...) erfc(z), evitando inf*0. */
+    if (z > 0.0) {
+        tail = 0.5 * exp(-0.5 * a * a) * scaled_erfc(z);
+    } else {
+        tail = 0.5 * exp(b * (0.5 * b - a)) * erfc(z);
+    }
+    return fmin(1.0, 0.5 * erfc(a / sqrt(2.0)) + tail);
+}
+
 int ising_metropolis_sweep(IsingLattice *lattice, double beta, double sigma, Pcg32 *rng)
 {
     double acceptance_probability[4];
+    /* Cache per le simulazioni seriali; aggiornata se cambiano i parametri. */
+    static double noisy_probability[7];
+    static double cached_beta = -1.0, cached_sigma = -1.0;
     int accepted = 0;
     int x;
     int y;
@@ -140,6 +181,14 @@ int ising_metropolis_sweep(IsingLattice *lattice, double beta, double sigma, Pcg
     acceptance_probability[1] = exp(-4.0 * beta);
     acceptance_probability[2] = exp(-8.0 * beta);
     acceptance_probability[3] = exp(-12.0 * beta);
+
+    if (sigma > 0.0 && (beta != cached_beta || sigma != cached_sigma)) {
+        for (int j = 0; j < 7; j++) {
+            noisy_probability[j] = ising_noisy_acceptance(4 * (j - 3), beta, sigma);
+        }
+        cached_beta = beta;
+        cached_sigma = sigma;
+    }
 
     for (z = 0; z < lattice->L; z++) {
         for (y = 0; y < lattice->L; y++) {
@@ -154,9 +203,8 @@ int ising_metropolis_sweep(IsingLattice *lattice, double beta, double sigma, Pcg
 
                 if (sigma > 0.0) {
                     /* Il rumore agisce su ogni tentativo, anche per delta E <= 0. */
-                    double noisy_delta = delta_energy + sigma * pcg32_gaussian(rng);
-                    accept = noisy_delta <= 0.0 ||
-                             pcg32_uniform(rng) < exp(-beta * noisy_delta);
+                    double probability = noisy_probability[delta_energy / 4 + 3];
+                    accept = probability >= 1.0 || pcg32_uniform(rng) < probability;
                 } else {
                     /* Caso pulito: stesse probabilita' e stessa sequenza RNG. */
                     accept = delta_energy <= 0 ||

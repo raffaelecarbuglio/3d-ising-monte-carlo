@@ -241,6 +241,22 @@ The measured energy and magnetization remain those of the physical spin configur
 
 Setting `sigma = 0` recovers the unperturbed implementation. Wolff runs require `sigma = 0`.
 
+For independent noise at each attempted flip, the code averages the acceptance
+over the Gaussian analytically:
+
+```text
+P(d) = Phi(-d/sigma) + exp(-beta*d + (beta*sigma)^2/2) * Phi(d/sigma - beta*sigma)
+```
+
+Here `Phi` is the standard normal cumulative distribution function. The seven
+probabilities for `d = -12,-8,-4,0,4,8,12` are cached (and recomputed if `beta`
+or `sigma` changes). A numerically stable form avoids overflow for large noise.
+Each noisy flip uses a lookup and a uniform draw, without generating a Gaussian.
+This preserves the spin transition probabilities, but changes trajectories for
+the same seed when `sigma > 0`. The `sigma = 0` RNG sequence is unchanged.
+This averaging does not apply to correlated noise. The cache assumes serial
+updates, as used by the batch scripts (independent processes).
+
 This mechanism is used to study the stability of Monte Carlo observables under controlled algorithmic noise.
 
 ## Batch workflows
