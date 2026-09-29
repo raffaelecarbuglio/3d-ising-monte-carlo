@@ -31,6 +31,7 @@ The code is intentionally compact and readable, with an emphasis on reproducibil
 ├── analyze.py                        observable and uncertainty analysis
 ├── blocking_plot.py                  blocking-plateau diagnostics
 ├── fit_scaling.py                    finite-size-scaling fit and bootstrap
+├── fit_beta_c.py                     critical-beta finite-size-scaling fit
 ├── plot_u_vs_rxi.py                  U vs R_xi visualization
 ├── run_metropolis.sh                 Metropolis parameter scans
 ├── run_wolff.sh                      Wolff parameter scans
@@ -39,6 +40,7 @@ The code is intentionally compact and readable, with an emphasis on reproducibil
 ├── tests.c                           C tests
 ├── test_analysis.py                  Python analysis tests
 ├── test_fit_scaling.py               scaling-fit tests
+├── test_fit_beta_c.py                critical-beta fit tests
 ├── inputs/                           example input files
 ├── plots/                            example diagnostic plots
 └── Makefile
@@ -234,6 +236,52 @@ The script produces:
 - PNG and PDF plots
 
 The fit can be rerun with different lattice-size cuts and polynomial degrees to test stability.
+
+## Critical inverse temperature fit
+
+The critical inverse temperature can be estimated from the finite-size scaling of
+\(R_\xi(\beta,L)\). The fit uses
+
+```text
+x = (beta - beta_c) L^(1/nu)
+
+R_xi(beta, L) =
+    sum_k a_k x^k
+    + L^(-omega) sum_k b_k x^k
+```
+
+with the 3D Ising exponents fixed to
+
+```text
+nu = 0.62997097
+omega = 0.8295
+```
+
+For every trial value of `beta_c`, the polynomial coefficients are found by
+weighted linear least squares. A one-dimensional minimization then determines
+the `beta_c` that minimizes chi squared. Block bootstrap replicas reconstruct
+\(R_\xi\) from the stored `g_zero` and `g_min` block averages and repeat the
+complete fit to estimate the statistical uncertainty.
+
+Example:
+
+```bash
+MPLBACKEND=Agg python3 fit_beta_c.py metropolis_runs_sigma05 \
+    --sizes 8 16 24 32 \
+    --degree-main 2 \
+    --degree-correction 1 \
+    --bootstrap 2000 \
+    --output-prefix beta_c_sigma05
+```
+
+By default the fit uses points with \(0.30 \le R_\xi \le 1.00\). The search
+interval for `beta_c` is the common beta overlap of the selected lattice sizes;
+it can be overridden with `--beta-min` and `--beta-max`.
+
+The script writes a text summary and PNG/PDF plots. The summary includes
+`beta_c`, its bootstrap uncertainty, the fitted critical value
+\(R_\xi^*=a_0\), chi squared per degree of freedom, polynomial degrees, and
+the fixed exponents.
 
 ## Controlled perturbation study
 
