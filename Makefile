@@ -13,7 +13,7 @@ test: ising tests
 	./tests
 
 test-analysis:
-	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v test_analysis.py test_fit_scaling.py
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v test_analysis.py test_fit_scaling.py test_fit_beta_c.py
 main.o: main.c input.h ising.h rng.h
 input.o: input.c input.h
 ising.o: ising.c ising.h rng.h
