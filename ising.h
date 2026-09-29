@@ -9,6 +9,8 @@ typedef struct {
     int L;
     int n_spins;
     int *spins;
+    int *neighbor_sum;  /* h_i = somma dei sei spin vicini. */
+    int neighbor_sum_valid;  /* Porre a 0 dopo modifiche dirette a spins. */
 } IsingLattice;
 
 /* L deve essere compreso tra 2 e ISING_MAX_L. */

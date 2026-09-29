@@ -210,6 +210,95 @@ static void test_reproducibility(double sigma)
     ising_destroy(&b);
 }
 
+
+/* Riferimento lento e indipendente: delta E dalla differenza delle energie. */
+static int reference_metropolis_sweep(IsingLattice *lattice, double beta,
+                                      double sigma, Pcg32 *rng)
+{
+    double probability[7];
+    int accepted = 0;
+    for (int j = 0; j < 7; j++) {
+        probability[j] = ising_noisy_acceptance(4 * (j - 3), beta, sigma);
+    }
+    for (int i = 0; i < lattice->n_spins; i++) {
+        int energy = ising_total_energy(lattice);
+        lattice->spins[i] = -lattice->spins[i];
+        int delta = ising_total_energy(lattice) - energy;
+        lattice->spins[i] = -lattice->spins[i];
+        double p = probability[delta / 4 + 3];
+        int accept = sigma > 0.0 ? (p >= 1.0 || pcg32_uniform(rng) < p)
+                                 : (delta <= 0 || pcg32_uniform(rng) < p);
+        if (accept) {
+            lattice->spins[i] = -lattice->spins[i];
+            accepted++;
+        }
+    }
+    return accepted;
+}
+
+static void test_cached_neighbors(void)
+{
+    const double parameters[][2] = {
+        {0.0, 0.0}, {0.15, 0.0}, {0.221654, 0.0}, {0.30, 0.0}, {0.221654, 0.5}
+    };
+    int trajectory_ok = 1, fields_ok = 1, lifecycle_ok = 1;
+    for (int L = 2; L <= 4; L++) {
+        IsingLattice cached, reference;
+        Pcg32 rng, reference_rng;
+        int cluster[64], in_cluster[64] = {0};
+        int saved_sweeps = 0;
+        if (!ising_create(&cached, L)) {
+            check(0, "allocazione cache nel test");
+            return;
+        }
+        if (!ising_create(&reference, L)) {
+            ising_destroy(&cached);
+            check(0, "allocazione riferimento nel test");
+            return;
+        }
+        pcg32_seed(&rng, 1234);
+        ising_fill_random(&cached, &rng);
+        for (int phase = 0; phase < 5; phase++) {
+            /* Ogni operazione deve invalidare anche una cache gia' popolata. */
+            if (phase == 1) ising_fill_ordered(&cached);
+            if (phase == 2) ising_fill_random(&cached, &rng);
+            if (phase == 3) {
+                lifecycle_ok &= ising_save_configuration("test_cache.tmp", &reference, 7);
+                lifecycle_ok &= ising_load_configuration("test_cache.tmp", &cached, &saved_sweeps);
+                lifecycle_ok &= saved_sweeps == 7;
+            }
+            if (phase == 4) {
+                ising_wolff_update(&cached, 0.4, &rng, cluster, in_cluster);
+            }
+            lifecycle_ok &= !cached.neighbor_sum_valid;
+            memcpy(reference.spins, cached.spins, cached.n_spins * sizeof(int));
+            reference_rng = rng;
+            for (int p = 0; p < 5; p++) {
+                for (int sweep = 0; sweep < 8; sweep++) {
+                    int a = ising_metropolis_sweep(&cached, parameters[p][0], parameters[p][1], &rng);
+                    int b = reference_metropolis_sweep(&reference, parameters[p][0], parameters[p][1], &reference_rng);
+                    trajectory_ok &= a == b && same_spins(&cached, &reference)
+                                  && rng.state == reference_rng.state;
+                    fields_ok &= cached.neighbor_sum_valid;
+                    int energy = ising_total_energy(&cached);
+                    for (int i = 0; i < cached.n_spins; i++) {
+                        cached.spins[i] = -cached.spins[i];
+                        int delta = ising_total_energy(&cached) - energy;
+                        cached.spins[i] = -cached.spins[i];
+                        fields_ok &= delta == 2 * cached.spins[i] * cached.neighbor_sum[i];
+                    }
+                }
+            }
+        }
+        ising_destroy(&cached);
+        ising_destroy(&reference);
+    }
+    remove("test_cache.tmp");
+    check(trajectory_ok, "cache: stessa traiettoria, accettazioni e stato RNG del riferimento");
+    check(fields_ok, "cache: campi coerenti con delta E, inclusi i vicini duplicati a L=2");
+    check(lifecycle_ok, "cache: invalidazione dopo fill, restart e Wolff");
+}
+
 static void test_gaussian(void)
 {
     Pcg32 rng, reference;
@@ -462,6 +551,7 @@ static void test_wolff_simulation(void)
 int main(void)
 {
     test_lattice();
+    test_cached_neighbors();
     test_reproducibility(0.0);
     test_reproducibility(0.5);
     test_gaussian();

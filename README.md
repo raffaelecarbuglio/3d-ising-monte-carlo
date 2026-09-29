@@ -70,6 +70,19 @@ make clean
 
 The simulator is currently a serial CPU implementation and does not require external C libraries.
 
+The default build uses `-O3 -flto` (link-time optimization). Run `make clean`
+before rebuilding after changing compiler flags. To disable LTO, use
+`make CFLAGS='-std=c11 -O3 -Wall -Wextra -Wpedantic'` after cleaning.
+
+Metropolis stores the six-neighbor spin sum at each site. An accepted flip
+updates the six neighboring sums by `-2 * old_spin`; rejected flips need no
+cache updates. The site order and random-number draws are unchanged, including
+for noisy acceptance. This uses one extra `int` per site (about 2 MB at L=80).
+The sums are rebuilt on the first Metropolis sweep after initialization,
+loading a configuration, or a Wolff update. Wolff does not maintain the sums.
+Code that edits `lattice.spins` directly must set `lattice.neighbor_sum_valid = 0`
+before the next Metropolis sweep. Checkpoint and measurement formats are unchanged.
+
 ## Running a simulation
 
 The executable takes a text input file:
