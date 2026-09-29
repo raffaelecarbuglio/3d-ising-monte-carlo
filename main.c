@@ -98,9 +98,13 @@ static int write_measurement(FILE *file, const IsingLattice *lattice,
                              int sweep,
                              const double *cos_table, const double *sin_table)
 {
-    int energy = ising_total_energy(lattice);
+    int L = lattice->L;
+    int energy = 0;
     double n = (double)lattice->n_spins;
     int magnetization = 0;
+    int plane_x[ISING_MAX_L] = {0};
+    int plane_y[ISING_MAX_L] = {0};
+    int plane_z[ISING_MAX_L] = {0};
     double real_x = 0.0;
     double imaginary_x = 0.0;
     double real_y = 0.0;
@@ -111,22 +115,41 @@ static int write_measurement(FILE *file, const IsingLattice *lattice,
     int x;
     int y;
     int z;
+    int coordinate;
 
-    for (z = 0; z < lattice->L; z++) {
-        for (y = 0; y < lattice->L; y++) {
-            for (x = 0; x < lattice->L; x++) {
-                int index = (z * lattice->L + y) * lattice->L + x;
+    /* Un solo passaggio raccoglie energia, magnetizzazione e somme sui piani. */
+    for (z = 0; z < L; z++) {
+        int next_z = (z + 1 == L) ? 0 : z + 1;
+
+        for (y = 0; y < L; y++) {
+            int next_y = (y + 1 == L) ? 0 : y + 1;
+
+            for (x = 0; x < L; x++) {
+                int next_x = (x + 1 == L) ? 0 : x + 1;
+                int index = (z * L + y) * L + x;
                 int spin = lattice->spins[index];
 
+                /* I tre vicini in avanti contano ogni legame una sola volta. */
+                energy -= spin * (lattice->spins[(z * L + y) * L + next_x]
+                                + lattice->spins[(z * L + next_y) * L + x]
+                                + lattice->spins[(next_z * L + y) * L + x]);
                 magnetization += spin;
-                real_x += spin * cos_table[x];
-                imaginary_x += spin * sin_table[x];
-                real_y += spin * cos_table[y];
-                imaginary_y += spin * sin_table[y];
-                real_z += spin * cos_table[z];
-                imaginary_z += spin * sin_table[z];
+                plane_x[x] += spin;
+                plane_y[y] += spin;
+                plane_z[z] += spin;
             }
         }
+    }
+
+    /* A momento (2*pi/L,0,0), la fase dipende solo da x: sommiamo prima
+       gli spin a x fissato. Lo stesso vale per le direzioni y e z. */
+    for (coordinate = 0; coordinate < L; coordinate++) {
+        real_x += plane_x[coordinate] * cos_table[coordinate];
+        imaginary_x += plane_x[coordinate] * sin_table[coordinate];
+        real_y += plane_y[coordinate] * cos_table[coordinate];
+        imaginary_y += plane_y[coordinate] * sin_table[coordinate];
+        real_z += plane_z[coordinate] * cos_table[coordinate];
+        imaginary_z += plane_z[coordinate] * sin_table[coordinate];
     }
 
     g_min = (real_x * real_x + imaginary_x * imaginary_x
