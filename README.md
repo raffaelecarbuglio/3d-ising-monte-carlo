@@ -274,9 +274,26 @@ MPLBACKEND=Agg python3 fit_beta_c.py metropolis_runs_sigma05 \
     --output-prefix beta_c_sigma05
 ```
 
-By default the fit uses points with \(0.30 \le R_\xi \le 1.00\). The search
+By default the fit uses a local window, \(0.45 \le R_\xi \le 0.75\), around
+the expected crossing region. This is a starting choice, not a universal range:
+vary `--r-min` and `--r-max`, as well as the polynomial degrees and size cuts,
+to check that the estimate is stable. Point selection uses the central values
+and stays fixed in every bootstrap replica. The search
 interval for `beta_c` is the common beta overlap of the selected lattice sizes;
 it can be overridden with `--beta-min` and `--beta-max`.
+
+At least three distinct lattice sizes must remain after selection. With the
+default quadratic main term and linear correction, two sizes cannot determine
+`beta_c`: its changes can be absorbed into the polynomial coefficients. Thus
+`--sizes 24 32` is not a valid stability check for this script.
+The script also rejects flat chi-squared profiles, minima at the search limits,
+and search intervals whose endpoints do not both exceed the minimum by
+`Delta chi2 > 1`. The last check requires the search range to constrain the
+estimate; widen it or add data if necessary. Failed bootstrap fits stop with
+the replica number and cause, rather than being silently discarded.
+
+The exponents remain fixed to Ising values: the estimate is conditional on that
+scaling model, so it does not independently establish the universality class.
 
 The script writes a text summary and PNG/PDF plots. The summary includes
 `beta_c`, its bootstrap uncertainty, the fitted critical value
