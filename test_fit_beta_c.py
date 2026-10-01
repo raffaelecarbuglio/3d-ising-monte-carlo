@@ -1,4 +1,3 @@
-import math
 from pathlib import Path
 import subprocess
 import sys
@@ -10,12 +9,15 @@ import numpy as np
 from fit_beta_c import (
     NU,
     bootstrap_fits,
-    bootstrap_rxi,
     design_matrix,
     fit_at_beta_c,
-    fit_beta_c,
+    make_fitter,
 )
 from fit_scaling import OMEGA
+
+
+def fit_beta_c(beta, r_xi, errors, sizes, p, q, beta_min, beta_max):
+    return make_fitter(beta, errors, sizes, p, q, beta_min, beta_max)(r_xi)
 
 
 class FitBetaCTests(unittest.TestCase):
@@ -55,6 +57,18 @@ class FitBetaCTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 fit_beta_c(beta, r_xi, errors, sizes, 2, 1, 0.221, 0.226)
 
+    def test_interior_minimum_near_either_endpoint_is_refined(self):
+        beta, r_xi, errors, sizes = self.sample()
+        errors = errors / 100
+        for low, high, endpoint in ((0.221, 0.223401, 30), (0.223399, 0.226, 0)):
+            with self.subTest(endpoint=endpoint):
+                grid_chi2 = [fit_at_beta_c(beta, r_xi, errors, sizes, value, 2, 1)[1]
+                             for value in np.linspace(low, high, 31)]
+                self.assertEqual(np.argmin(grid_chi2), endpoint)
+                beta_c, _, chi2, _ = fit_beta_c(beta, r_xi, errors, sizes, 2, 1, low, high)
+                self.assertAlmostEqual(beta_c, 0.2234, places=10)
+                self.assertGreater(min(grid_chi2[0], grid_chi2[-1]) - chi2, 1)
+
     def test_noisy_three_size_fit(self):
         beta, r_xi, errors, sizes = self.sample((16, 24, 32))
         r_xi += np.random.default_rng(9).normal(0, errors)
@@ -78,12 +92,18 @@ class FitBetaCTests(unittest.TestCase):
 
     def test_complete_bootstrap_is_reproducible(self):
         points = self.block_points()
-        first = bootstrap_fits(points, 2, 1, 6, 123, 0.221, 0.226)
-        second = bootstrap_fits(points, 2, 1, 6, 123, 0.221, 0.226)
-        for a, b in zip(first, second):
-            np.testing.assert_array_equal(a, b)
-        self.assertGreater(np.std(first[0]), 0)
-        self.assertLess(abs(np.mean(first[0]) - 0.2234), 0.0001)
+        beta, errors, sizes = (np.array([point[key] for point in points])
+                              for key in ("beta", "err_Rxi", "L"))
+        fit = make_fitter(beta, errors, sizes, 2, 1, 0.221, 0.226)
+        first = bootstrap_fits(points, fit, 6, 123)
+        second = bootstrap_fits(points, fit, 6, 123)
+        np.testing.assert_array_equal(first, second)
+        self.assertEqual(first.shape, (6, 6))
+        self.assertGreater(np.std(first[:, 0]), 0)
+        self.assertLess(abs(np.mean(first[:, 0]) - 0.2234), 0.0001)
+        points[0]["blocks"][:, 1] = 0
+        with self.assertRaisesRegex(ValueError, "bootstrap 1/6"):
+            bootstrap_fits(points, fit, 6, 123)
 
     def test_command_line_outputs_and_missing_size(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -102,6 +122,14 @@ class FitBetaCTests(unittest.TestCase):
             self.assertIn("Rxi range = 0.45 0.75", report)
             for extension in ("png", "pdf"):
                 self.assertGreater((directory / f"fit.{extension}").stat().st_size, 1000)
+            # Without explicit limits, use the whole selected beta range.
+            default = command[:command.index("--beta-min")] + command[command.index("--output-prefix"):]
+            result = subprocess.run(default, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            selected = [p for p in self.block_points() if 0.45 <= p["Rxi"] <= 0.75]
+            low, high = min(p["beta"] for p in selected), max(p["beta"] for p in selected)
+            self.assertIn(f"beta search range = {low:.17g} {high:.17g}",
+                          (directory / "fit_summary.txt").read_text())
             result = subprocess.run(command + ["--sizes", "8", "16", "24", "32"],
                                     capture_output=True, text=True)
             self.assertEqual(result.returncode, 1)
@@ -163,25 +191,6 @@ class FitBetaCTests(unittest.TestCase):
 
         np.testing.assert_allclose(coefficients, expected)
         self.assertAlmostEqual(chi2, 0.0, places=20)
-
-    def test_bootstrap_rxi_is_reproducible(self):
-        point = {
-            "L": 8,
-            "beta": 0.22,
-            "blocks": np.array([
-                [4.0, 1.0, 1.0, 1.2],
-                [5.0, 1.0, 1.1, 1.4],
-                [6.0, 1.0, 1.2, 1.7],
-                [7.0, 1.0, 1.3, 2.0],
-            ]),
-        }
-
-        first = bootstrap_rxi(point, np.random.default_rng(123))
-        second = bootstrap_rxi(point, np.random.default_rng(123))
-
-        self.assertTrue(math.isfinite(first))
-        self.assertEqual(first, second)
-
 
 if __name__ == "__main__":
     unittest.main()
