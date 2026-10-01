@@ -8,6 +8,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+from plot_u_vs_rxi import plot_points
+
 
 OMEGA = 0.8295  # 3D Ising, Reehorst, JHEP 09 (2022) 177
 
@@ -88,20 +90,21 @@ def asymptotic_curve(coefficients, r_xi, degree_main):
     )
 
 
+def observable_pairs(means, size):
+    """Reconstruct (Rxi,U) from rows of (g_zero,g_min,m2,m4) means."""
+    means = np.asarray(means)
+    g0, gp, m2, m4 = means.T
+    if (not np.isfinite(means).all() or np.any(gp <= 0)
+            or np.any(g0 < gp) or np.any(m2 <= 0) or np.any(m4 <= 0)):
+        raise ValueError(f"invalid block observables for L={size}")
+    r = np.sqrt(g0 / gp - 1) / (2 * size * math.sin(math.pi / size))
+    return np.stack((r, m4 / m2**2), axis=-1)
+
+
 def bootstrap_pair(point, rng):
     blocks = point["blocks"]
-    sampled = blocks[rng.integers(0, len(blocks), len(blocks))]
-    g_zero, g_min, m2, m4 = np.mean(sampled, axis=0)
-
-    if g_min <= 0.0 or g_zero < g_min or m2 <= 0.0:
-        raise ValueError(
-            f"replica bootstrap non valida per L={point['L']}, beta={point['beta']}"
-        )
-
-    r_xi = math.sqrt(g_zero / g_min - 1.0)
-    r_xi /= 2.0 * point["L"] * math.sin(math.pi / point["L"])
-    u = m4 / m2**2
-    return r_xi, u
+    counts = np.bincount(rng.integers(len(blocks), size=len(blocks)), minlength=len(blocks))
+    return tuple(observable_pairs(counts @ blocks / len(blocks), point["L"]))
 
 
 def bootstrap_curves(points, degree_main, degree_correction, replicas, seed, r_grid):
@@ -128,21 +131,10 @@ def bootstrap_curves(points, degree_main, degree_correction, replicas, seed, r_g
 def save_plot(points, r_grid, central, low, high, output):
     figure, axis = plt.subplots(figsize=(6.3, 4.7))
 
-    for index, size in enumerate(sorted({point["L"] for point in points})):
-        selected = [point for point in points if point["L"] == size]
-        selected.sort(key=lambda point: point["Rxi"])
-        axis.errorbar(
-            [point["Rxi"] for point in selected],
-            [point["U"] for point in selected],
-            xerr=[point["err_Rxi"] for point in selected],
-            yerr=[point["err_U"] for point in selected],
-            fmt="none",
-            color=f"C{index}",
-            elinewidth=0.8,
-            capsize=2.0,
-            capthick=0.8,
-            label=fr"$L={size}$",
-        )
+    plot_points(axis, np.array([
+        [point[key] for key in ("L", "beta", "Rxi", "err_Rxi", "U", "err_U")]
+        for point in points
+    ]))
 
     axis.fill_between(r_grid, low, high, alpha=0.2, label="68% bootstrap")
     axis.plot(r_grid, central, linewidth=1.4, label=r"$U_\infty(R_\xi)$")
