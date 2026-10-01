@@ -32,7 +32,7 @@ The code is intentionally compact and readable, with an emphasis on reproducibil
 ├── blocking_plot.py                  blocking-plateau diagnostics
 ├── fit_scaling.py                    finite-size-scaling fit and bootstrap
 ├── fit_beta_c.py                     critical-beta finite-size-scaling fit
-├── prepare_clean_reference.py        one-time clean fit and bootstrap
+├── clean_reference.npz               fixed Wolff fit and 5000 bootstrap fits
 ├── compare_universality.py           perturbed data vs saved clean reference
 ├── plot_u_vs_rxi.py                  U vs R_xi visualization
 ├── run_metropolis.sh                 Metropolis parameter scans
@@ -60,8 +60,7 @@ make
 make test
 ```
 
-The Python analysis requires Python 3, NumPy, and Matplotlib. The correlated
-clean-reference preparation also uses SciPy:
+The Python analysis requires Python 3, NumPy, and Matplotlib:
 
 ```bash
 python3 -m pip install -r requirements.txt
@@ -237,30 +236,26 @@ The fit can be rerun with different lattice-size cuts and polynomial degrees to 
 
 ## Clean-versus-perturbed universality comparison
 
-First prepare the clean Wolff reference **once**:
+The bundled `clean_reference.npz` contains the fixed Wolff reference: **all 94
+points with L >= 16**, degrees **6 and 3**, **omega = 0.8295**, and **5000 paired
+block-bootstrap coefficient sets** (seed 12345). It uses the existing
+`fit_scaling.py` vertical-error fit, `U = P(Rxi) + L^(-omega) Q(Rxi)`, with ordinary
+powers of Rxi and no clean Rxi cut. Its chi2/dof is **44.21632987/83 = 0.5327268659**.
+Source filenames, SHA-256 hashes and the observed Rxi range are stored in the
+archive. The source is `fit_analysis_input.tar.gz` supplied on 24 September 2026.
 
-```bash
-MPLBACKEND=Agg OPENBLAS_NUM_THREADS=1 python3 prepare_clean_reference.py \
-    beta_runs_L8-16-24-32 beta_runs_L48-64 beta_runs_L80 \
-    --output clean_reference.npz
-```
-
-Preparation uses all clean `*_blocks.txt` with **L >= 16**, degrees **6 and 3**,
-and **omega = 0.8295**, fitting `U = P(Rxi) + (L/16)^(-omega) Q(Rxi)` with both
-coordinate errors and their block-jackknife covariance. It saves the central
-coefficients, 5000 clean bootstrap fits, observed domain, fit quality and source
-paths. Chebyshev polynomials on the clean range improve conditioning.
-
-Then compare any perturbed batch with that saved reference:
+Compare any perturbed batch directly:
 
 ```bash
 MPLBACKEND=Agg python3 compare_universality.py \
-    --reference clean_reference.npz \
     --perturbed "$ORIG_DIR" "$EXTRA_DIR" --output-prefix sigma05_vs_clean
 ```
 
 The comparison **never refits or resamples the clean data**. It loads the saved
-reference, checks its fixed settings, and resamples only the perturbed blocks.
+reference beside the script, checks its model and array dimensions, and resamples
+only the perturbed blocks. Central observables and their errors are read directly
+from the headers written by `analyze.py`; no jackknife calculation is repeated.
+No preparation script or SciPy installation is required.
 The same saved clean replica is shared by all perturbed points in each bootstrap,
 preserving their residual covariance. Clean block files are no longer needed.
 
@@ -269,24 +264,28 @@ perturbed L=8 points are included. The former `--clean`, `--clean-lmin`,
 `--clean-r-min/max`, `--degree-main/correction`, `--omega`, and `--r-min/max`
 options have been removed. By default comparison uses all saved replicas;
 `--bootstrap 200` uses the first 200 for a quick check, and cannot exceed the
-saved count. Both scripts accept `--seed`; preparation also accepts `--bootstrap`.
+saved count. `--seed` controls the perturbed resampling; `--reference` can select
+another saved file with the same model and coefficient format.
 
 Outputs under the comparison prefix:
 
 - `_u_vs_rxi.png/.pdf`: perturbed points and clean curve with pointwise 68% band.
 - `_scaled_delta_u.png/.pdf`: `L^omega [U - U_clean_infinity(Rxi)]` with bootstrap errors.
-- `_points.txt`, `_clean_curve.txt`, `_summary.txt`: numerical results and settings.
+- `_points.txt`: perturbed observables/errors, reference values, differences and
+  scaled differences with bootstrap errors.
 - `_bootstrap.npz`: coefficient/pair/residual replicas, full residual covariance,
-  reference filename, basis metadata and source paths; point order matches `_points.txt`.
+  reference filename, settings and source paths; point order matches `_points.txt`.
+  `clean_curve` contains columns `Rxi, U_clean, low_68, high_68` for the plotted band.
+  This archive replaces the separate curve and summary text files.
 
 Use adequate block sizes and independent ensembles. Duplicate `(L,beta)` points,
-overlapping source paths and central points beyond the clean domain are rejected.
+block files identical to a clean source (even if renamed), and central points
+beyond the clean domain are rejected.
 Errors remain conditional on the clean model: assess its quality before use.
 Scaled residuals should approach a common curve, not necessarily zero.
-Regenerate the reference only if the clean data change. Old comparison archives
-lack the required preparation metadata; generate `clean_reference.npz` with the
-preparation command above. The reference is a local analysis result, not supplied
-with the code; keep it alongside your production data.
+The saved bootstrap sets retain correlations between fit coefficients and give
+the reference band without treating coefficient errors as independent. Earlier
+Chebyshev/correlated-fit archives are incompatible: use the bundled reference.
 
 ## Critical inverse temperature fit
 

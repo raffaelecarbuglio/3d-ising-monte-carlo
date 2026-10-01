@@ -1,18 +1,17 @@
 import contextlib
 import io
 import tempfile
-import shutil
+import hashlib
+import os
 import unittest
 from pathlib import Path
 
 import numpy as np
-from scipy.optimize import minimize
 
 from compare_universality import (
-    bootstrap_comparison, evaluate, jackknife_pair,
-    load_points, load_reference, main, observable_pairs,
+    bootstrap_comparison, evaluate,
+    load_points, load_reference, main,
 )
-from prepare_clean_reference import basis, fit_clean, main as prepare_main
 from fit_scaling import OMEGA
 
 
@@ -27,12 +26,8 @@ def make_point(size, r, u, seed, beta=0.22):
         0.003 * noise[:, 0], 0.003 * noise[:, 1],
         0.003 * noise[:, 0], 0.002 * noise[:, 0] + 0.003 * noise[:, 2],
     ))
-    point = dict(L=size, beta=beta, blocks=means * (1 + perturbations))
-    point["pair"], point["covariance"] = jackknife_pair(point)
-    point.update(Rxi=point["pair"][0], U=point["pair"][1],
-                 err_Rxi=np.sqrt(point["covariance"][0, 0]),
-                 err_U=np.sqrt(point["covariance"][1, 1]))
-    return point
+    return dict(L=size, beta=beta, blocks=means * (1 + perturbations),
+                Rxi=r, U=u, err_Rxi=0.001, err_U=0.002)
 
 
 def save_point(path, point):
@@ -43,46 +38,45 @@ def save_point(path, point):
 
 
 class UniversalityTests(unittest.TestCase):
-    def test_correlated_line_matches_analytically_profiled_distance(self):
-        rng = np.random.default_rng(23)
-        r = np.tile(np.linspace(0.3, 1, 10), 3)
-        sizes = np.repeat([16, 32, 64], 10)
-        covariance = np.tile([[0.0004, -0.00015], [-0.00015, 0.0003]], (len(r), 1, 1))
-        coefficients = np.array([2.0, -0.3, 0.08])
-        pairs = np.column_stack((r, basis(r, sizes, 1, 0, OMEGA, (0.3, 1)) @ coefficients))
-        pairs += rng.multivariate_normal([0, 0], covariance[0], size=len(r))
-        result, chi2, dof = fit_clean(pairs, covariance, sizes, 1, 0, OMEGA, (0.3, 1))
+    def test_bundled_reference_matches_reported_94_point_fit(self):
+        reference = load_reference(Path(__file__).with_name("clean_reference.npz"))
+        self.assertEqual(reference["clean_coefficients"].shape, (5000, 11))
+        self.assertEqual(len(reference["clean_paths"]), 94)
+        self.assertEqual(int(reference["dof"]), 83)
+        self.assertAlmostEqual(float(reference["chi2"]), 44.21632986812246, places=9)
+        np.testing.assert_allclose(reference["coefficients"], [
+            2.8142240796356073, 5.821679480578112, -43.522794929376033,
+            96.305141468186577, -106.14348481524891, 59.508782036064538,
+            -13.539418997071191, -0.26729992731527624, -1.8571338563591855,
+            4.0541527302765035, -2.0487227861018917,
+        ], rtol=1e-14)
+        np.testing.assert_allclose(reference["clean_coefficients"].std(axis=0, ddof=1), [
+            0.13317781919578847, 1.375910597466804, 5.732777575133909,
+            12.346766076790198, 14.530829154097166, 8.8825210849564513,
+            2.2084541531345865, 0.13582240992101161, 0.64589173965727353,
+            0.96736284486109481, 0.46106917110815937,
+        ], rtol=1e-14)
+        self.assertLess(float(reference["r_range"][0]), 0.30)
+        self.assertGreater(float(reference["r_range"][1]), 1.00)
+        # Correlated intercept/slope shifts cancel at r=0.6.
+        samples = np.zeros((5, 11))
+        samples[:, 0] = np.arange(5) * 0.6
+        samples[:, 1] = -np.arange(5)
+        np.testing.assert_allclose([evaluate(c, 0.6) for c in samples], 0, atol=1e-15)
 
-        def exact_profile(c):
-            slope = c[1] * 2 / 0.7
-            residual = pairs[:, 1] - evaluate(c, pairs[:, 0], 1, (0.3, 1), sizes, OMEGA)
-            variance = covariance[:, 1, 1] + slope**2 * covariance[:, 0, 0] - 2 * slope * covariance[:, 0, 1]
-            return np.sum(residual**2 / variance)
-
-        reference = minimize(exact_profile, coefficients, method="BFGS", tol=1e-9)
-        np.testing.assert_allclose(result, reference.x, atol=1e-6)
-        self.assertAlmostEqual(chi2, reference.fun, places=7)
-        self.assertEqual(dof, len(r) - 3)
-
-    def test_nonlinear_fit_recovers_reference_and_correction(self):
-        r = np.tile(np.linspace(0.3, 1, 12), 4)
-        sizes = np.repeat([16, 24, 32, 64], 12)
-        domain = (0.3, 1)
-        expected = np.array([2.1, -0.4, 0.03, 0.08, -0.02])
-        pairs = np.column_stack((r, basis(r, sizes, 2, 1, OMEGA, domain) @ expected))
-        covariance = np.tile([[1e-6, -1e-6], [-1e-6, 4e-6]], (len(r), 1, 1))
-        actual, chi2, _ = fit_clean(pairs, covariance, sizes, 2, 1, OMEGA, domain)
-        np.testing.assert_allclose(actual, expected, atol=1e-10)
-        self.assertLess(chi2, 1e-15)
-
-    def test_jackknife_retains_pair_covariance(self):
-        point = make_point(16, 0.6, 1.8, 1)
-        pair, covariance = jackknife_pair(point)
-        np.testing.assert_allclose(pair, [0.6, 1.8], atol=1e-14)
-        self.assertLess(covariance[0, 1], 0)
-        self.assertGreater(np.linalg.det(covariance), 0)
-        with self.assertRaises(ValueError):
-            observable_pairs([1, 0, 1, 1], 16)
+    def test_reads_saved_errors_without_recomputing(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "saved_blocks.txt"
+            point = make_point(16, 0.6, 1.8, 1)
+            point.update(err_Rxi=0.12, err_U=0.34)
+            save_point(path, point)
+            loaded = load_points([path])[0]
+            self.assertEqual(loaded["err_Rxi"], 0.12)
+            self.assertEqual(loaded["err_U"], 0.34)
+            point["err_U"] = -0.1
+            save_point(path, point)
+            with self.assertRaises(ValueError):
+                load_points([path])
 
     def test_saved_reference_adds_cross_point_covariance(self):
         # Vary only the reference intercept, isolating its shared uncertainty.
@@ -92,48 +86,53 @@ class UniversalityTests(unittest.TestCase):
         for point in perturbed:
             point["blocks"][:] = point["blocks"].mean(axis=0)
         with contextlib.redirect_stdout(io.StringIO()):
-            first = bootstrap_comparison(perturbed, samples, (0.3, 1), 7)
-            second = bootstrap_comparison(perturbed, samples, (0.3, 1), 7)
+            first = bootstrap_comparison(perturbed, samples, 7)
+            second = bootstrap_comparison(perturbed, samples, 7)
         for a, b in zip(first, second):
             np.testing.assert_array_equal(a, b)
         self.assertAlmostEqual(np.corrcoef(first[1].T)[0, 1], 1, places=10)
         np.testing.assert_allclose(first[1][:, 0] / 16**OMEGA,
                                    first[1][:, 1] / 32**OMEGA, atol=1e-13)
 
-    def test_prepare_once_then_compare_without_clean_inputs(self):
+    def test_compare_saved_reference_without_clean_inputs(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            clean, perturbed = root / "clean", root / "perturbed"
-            clean.mkdir()
+            perturbed = root / "perturbed"
             perturbed.mkdir()
-            for i, (size, r) in enumerate((size, r) for size in [8, 16, 32, 64]
-                                         for r in np.linspace(0.28, 1.02, 12)):
-                u = 2.4 - 0.5*r + 0.05*(size/16)**(-OMEGA)
-                save_point(clean / f"{i}_blocks.txt", make_point(size, r, u, i, 0.22+i*1e-5))
             for i, size in enumerate([8, 16, 24, 32]):
                 u = 2.4 - 0.5*0.6 + 0.1*size**(-OMEGA)
                 save_point(perturbed / f"{i}_blocks.txt", make_point(size, 0.6, u, 100+i))
             cache = root / "clean_reference.npz"
-            with contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(prepare_main([str(clean), "--bootstrap", "5", "--output", str(cache)]), 0)
+            coefficients = np.zeros(11)
+            coefficients[:2] = [2.4, -0.5]
+            samples = np.tile(coefficients, (5, 1))
+            samples[:, 0] += np.linspace(-0.001, 0.001, 5)
+            np.savez(cache, coefficients=coefficients, clean_coefficients=samples,
+                     r_range=[0.28, 1.02], clean_lmin=16, degree_main=6, degree_correction=3,
+                     omega=OMEGA, basis="power", fit_method="vertical", chi2=1., dof=25,
+                     seed=12345, clean_paths=[f"missing/{i}_blocks.txt" for i in range(36)],
+                     clean_hashes=["0"*64]*36)
             ref = load_reference(cache)
-            self.assertEqual(len(ref["clean_paths"]), 36)  # all L>=16, including edge points
             original_cache = cache.read_bytes()
-            shutil.rmtree(clean)  # comparison must work with no clean blocks available
             prefix = root / "output" / "comparison"
             argv = ["--reference", str(cache), "--perturbed", str(perturbed),
                     "--output-prefix", str(prefix)]
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(main(argv), 0)
             self.assertEqual(cache.read_bytes(), original_cache)
-            summary = Path(f"{prefix}_summary.txt").read_text()
-            self.assertIn("clean points = 36; perturbed points = 4", summary)
+            self.assertFalse(Path(f"{prefix}_summary.txt").exists())
+            self.assertFalse(Path(f"{prefix}_clean_curve.txt").exists())
             rows = np.loadtxt(f"{prefix}_points.txt")
+            np.testing.assert_array_equal(rows[:, 3], np.full(4, 0.001))
+            np.testing.assert_array_equal(rows[:, 5], np.full(4, 0.002))
             np.testing.assert_allclose(rows[:, 9], 0.1, atol=1e-9)
             self.assertTrue(np.all(rows[:, 10] > 0))
             with np.load(f"{prefix}_bootstrap.npz") as archive:
                 self.assertEqual(archive["scaled_delta_U_covariance"].shape, (4, 4))
                 self.assertEqual(archive["perturbed_pairs"].shape, (5, 4, 2))
+                self.assertEqual(archive["clean_curve"].shape, (300, 4))
+                self.assertEqual(len(archive["clean_paths"]), 36)
+                self.assertEqual(int(archive["reference_seed"]), 12345)
                 np.testing.assert_array_equal(archive["clean_coefficients"], ref["clean_coefficients"])
             for suffix in ("u_vs_rxi", "scaled_delta_u"):
                 for extension in ("png", "pdf"):
@@ -152,8 +151,23 @@ class UniversalityTests(unittest.TestCase):
             bad.write_text(bad.read_text().replace("# err_U =", "# old_err_U ="))
             with contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(main(argv), 1)
+            save_point(bad, make_point(8, 0.6, 2.1, 100))
+            same_clean = dict(ref, clean_hashes=np.array(
+                [hashlib.sha256(bad.read_bytes()).hexdigest()]*36))
+            np.savez(cache, **same_clean)
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(main(argv), 1)
+            # Default reference is relative to the script, independent of cwd.
+            previous = Path.cwd()
+            try:
+                os.chdir(root)
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(main(["--perturbed", str(perturbed), "--bootstrap", "5",
+                                           "--output-prefix", str(root / "default")]), 0)
+            finally:
+                os.chdir(previous)
             for key, bad_value in (("clean_lmin", 8), ("omega", 0.8), ("degree_main", 5),
-                                   ("r_min", 0.4), ("clean_coefficients", np.full((5, 11), np.nan))):
+                                   ("basis", "chebyshev"), ("fit_method", "correlated"), ("clean_coefficients", np.full((5, 11), np.nan))):
                 np.savez(cache, **dict(ref, **{key: bad_value}))
                 with self.assertRaises(ValueError):
                     load_reference(cache)
