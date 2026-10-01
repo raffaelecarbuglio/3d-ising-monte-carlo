@@ -9,7 +9,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from fit_scaling import OMEGA, find_block_files, read_block_file
+from fit_scaling import OMEGA, bootstrap_pair, find_block_files, read_block_file
 
 NU = 0.62997097  # 3D Ising, Chang et al., JHEP 03 (2025) 136
 
@@ -33,11 +33,11 @@ def fit_at_beta_c(beta, r_xi, errors, sizes, beta_c, p, q):
     return coefficients, float(residuals @ residuals)
 
 
-def fit_beta_c(beta, r_xi, errors, sizes, p, q, beta_min, beta_max):
-    beta, r_xi, errors, sizes = [np.asarray(v, dtype=float)
-                               for v in (beta, r_xi, errors, sizes)]
+def make_fitter(beta, errors, sizes, p, q, beta_min, beta_max):
+    """Prepare fixed inputs once; return a fit usable for bootstrap replicas."""
+    beta, errors, sizes = [np.asarray(v, dtype=float) for v in (beta, errors, sizes)]
     if any(v.ndim != 1 or v.shape != beta.shape or not np.all(np.isfinite(v))
-           for v in (beta, r_xi, errors, sizes)):
+           for v in (beta, errors, sizes)):
         raise ValueError("i dati devono essere vettori finiti della stessa lunghezza")
     if np.any(errors <= 0) or np.any(sizes <= 1):
         raise ValueError("servono errori positivi e L > 1")
@@ -51,72 +51,54 @@ def fit_beta_c(beta, r_xi, errors, sizes, p, q, beta_min, beta_max):
     if not np.isfinite([beta_min, beta_max]).all() or beta_min >= beta_max:
         raise ValueError("servono beta-min < beta-max finiti")
 
-    def objective(value):
-        return fit_at_beta_c(beta, r_xi, errors, sizes, value, p, q)[1]
+    def fit(r_xi):
+        r_xi = np.asarray(r_xi, dtype=float)
+        if r_xi.shape != beta.shape or not np.isfinite(r_xi).all():
+            raise ValueError("Rxi deve essere un vettore finito della stessa lunghezza di beta")
 
-    # Scansione del profilo: un minimo numerico non basta se chi2 e' piatto.
-    grid = np.linspace(beta_min, beta_max, 31)
-    values = np.array([objective(value) for value in grid])
-    if np.ptp(values) <= 1e-8 * max(1.0, values.min()):
-        raise ValueError("beta_c indeterminato: profilo chi2 piatto")
-    best = int(np.argmin(values))
-    if best in (0, len(grid) - 1):
-        raise ValueError("minimo al bordo: ampliare l'intervallo in beta")
+        def objective(value):
+            return fit_at_beta_c(beta, r_xi, errors, sizes, value, p, q)[1]
 
-    # Sezione aurea: restringe l'intervallo senza derivate o nuove dipendenze.
-    left, right = grid[best - 1], grid[best + 1]
-    golden = (math.sqrt(5.0) - 1.0) / 2.0
-    x1, x2 = right - golden * (right - left), left + golden * (right - left)
-    f1, f2 = objective(x1), objective(x2)
-    for _ in range(40):
-        if f1 < f2:
-            right, x2, f2 = x2, x1, f1
-            x1 = right - golden * (right - left)
-            f1 = objective(x1)
-        else:
-            left, x1, f1 = x1, x2, f2
-            x2 = left + golden * (right - left)
-            f2 = objective(x2)
-    beta_c = (left + right) / 2.0
-    coefficients, chi2 = fit_at_beta_c(beta, r_xi, errors, sizes, beta_c, p, q)
-    # Richiediamo che entrambi i bordi escludano almeno Delta chi2 <= 1.
-    if min(values[0], values[-1]) <= chi2 + 1.0:
-        raise ValueError("beta_c poco vincolato nell'intervallo: ampliare i limiti o aggiungere dati")
-    return beta_c, coefficients, chi2, dof
+        grid = np.linspace(beta_min, beta_max, 31)
+        values = np.array([objective(value) for value in grid])
+        if np.ptp(values) <= 1e-8 * max(1.0, values.min()):
+            raise ValueError("beta_c indeterminato: profilo chi2 piatto")
+        best = int(np.argmin(values))
+        # Refine even when the coarse scan chooses an endpoint.
+        left, right = grid[max(0, best - 1)], grid[min(len(grid) - 1, best + 1)]
+        golden = (math.sqrt(5.0) - 1.0) / 2.0
+        x1, x2 = right - golden * (right - left), left + golden * (right - left)
+        f1, f2 = objective(x1), objective(x2)
+        for _ in range(40):
+            if f1 < f2:
+                right, x2, f2 = x2, x1, f1
+                x1 = right - golden * (right - left)
+                f1 = objective(x1)
+            else:
+                left, x1, f1 = x1, x2, f2
+                x2 = left + golden * (right - left)
+                f2 = objective(x2)
+        beta_c = (left + right) / 2.0
+        coefficients, chi2 = fit_at_beta_c(beta, r_xi, errors, sizes, beta_c, p, q)
+        if min(beta_c - beta_min, beta_max - beta_c) <= (beta_max - beta_min) * 1e-8:
+            raise ValueError("minimo al bordo: ampliare l'intervallo in beta")
+        if min(values[0], values[-1]) <= chi2 + 1.0:
+            raise ValueError("beta_c poco vincolato nell'intervallo: ampliare i limiti o aggiungere dati")
+        return beta_c, coefficients, chi2, dof
 
-
-def bootstrap_rxi(point, rng):
-    blocks = point["blocks"]
-    sampled = blocks[rng.integers(0, len(blocks), len(blocks))]
-    g_zero, g_min = np.mean(sampled[:, :2], axis=0)
-    if not np.isfinite([g_zero, g_min]).all() or g_min <= 0 or g_zero < g_min:
-        raise ValueError(f"replica bootstrap non valida: L={point['L']}, beta={point['beta']}")
-    return math.sqrt(g_zero / g_min - 1) / (2 * point["L"] * math.sin(math.pi / point["L"]))
+    return fit
 
 
-def bootstrap_fits(points, p, q, replicas, seed, beta_min, beta_max):
+def bootstrap_fits(points, fit, replicas, seed):
     rng = np.random.default_rng(seed)
-    beta = np.array([point["beta"] for point in points])
-    sizes = np.array([point["L"] for point in points])
-    errors = np.array([point["err_Rxi"] for point in points])
-    beta_c_all = np.empty(replicas)
-    coefficients_all = np.empty((replicas, p + q + 2))
+    samples = []
     for replica in range(replicas):
-        # La selezione dei punti e i pesi rimangono quelli dei dati centrali.
-        r_xi = np.array([bootstrap_rxi(point, rng) for point in points])
         try:
-            beta_c, coefficients, _, _ = fit_beta_c(
-                beta, r_xi, errors, sizes, p, q, beta_min, beta_max
-            )
+            beta_c, coefficients, _, _ = fit([bootstrap_pair(point, rng)[0] for point in points])
         except ValueError as error:
             raise ValueError(f"bootstrap {replica + 1}/{replicas}: {error}") from error
-        beta_c_all[replica], coefficients_all[replica] = beta_c, coefficients
-    return beta_c_all, coefficients_all
-
-
-def fitted_rxi(beta, size, beta_c, coefficients, p, q):
-    beta = np.asarray(beta)
-    return design_matrix(beta, np.full(beta.shape, size), beta_c, p, q) @ coefficients
+        samples.append(np.r_[beta_c, coefficients])
+    return np.array(samples)
 
 
 def save_plot(points, beta_c, coefficients, p, q, output):
@@ -129,7 +111,7 @@ def save_plot(points, beta_c, coefficients, p, q, output):
                       fmt="none", color=f"C{index}", elinewidth=0.8,
                       capsize=2, capthick=0.8, label=fr"$L={size}$")
         grid = np.linspace(beta.min(), beta.max(), 200)
-        axis.plot(grid, fitted_rxi(grid, size, beta_c, coefficients, p, q),
+        axis.plot(grid, design_matrix(grid, np.full_like(grid, size), beta_c, p, q) @ coefficients,
                   color=f"C{index}", linewidth=1)
     axis.axvline(beta_c, color="black", linewidth=1, linestyle="--")
     axis.set_xlabel(r"$\beta$")
@@ -172,25 +154,16 @@ def main():
         if args.sizes is not None and set(args.sizes) != set(sizes):
             raise ValueError("una taglia richiesta non ha punti nella finestra Rxi")
         points.sort(key=lambda point: (point["L"], point["beta"]))
-        beta = np.array([point["beta"] for point in points])
-        r_xi = np.array([point["Rxi"] for point in points])
-        errors = np.array([point["err_Rxi"] for point in points])
-        lattice_sizes = np.array([point["L"] for point in points])
-        beta_min = args.beta_min
-        beta_max = args.beta_max
-        if beta_min is None:
-            beta_min = max(beta[lattice_sizes == size].min() for size in sizes)
-        if beta_max is None:
-            beta_max = min(beta[lattice_sizes == size].max() for size in sizes)
+        beta, r_xi, errors, lattice_sizes = (
+            np.array([point[key] for point in points]) for key in ("beta", "Rxi", "err_Rxi", "L")
+        )
+        beta_min = beta.min() if args.beta_min is None else args.beta_min
+        beta_max = beta.max() if args.beta_max is None else args.beta_max
         p, q = args.degree_main, args.degree_correction
-        beta_c, coefficients, chi2, dof = fit_beta_c(
-            beta, r_xi, errors, lattice_sizes, p, q, beta_min, beta_max
-        )
-        bootstrap_beta_c, bootstrap_coefficients = bootstrap_fits(
-            points, p, q, args.bootstrap, args.seed, beta_min, beta_max
-        )
-        beta_c_error = np.std(bootstrap_beta_c, ddof=1)
-        coefficient_errors = np.std(bootstrap_coefficients, axis=0, ddof=1)
+        fit = make_fitter(beta, errors, lattice_sizes, p, q, beta_min, beta_max)
+        beta_c, coefficients, chi2, dof = fit(r_xi)
+        samples = bootstrap_fits(points, fit, args.bootstrap, args.seed)
+        beta_c_error, *coefficient_errors = np.std(samples, axis=0, ddof=1)
 
         # Un solo resoconto, usato sia per il file sia per il terminale.
         report = [f"nu = {NU} (fixed)", f"omega = {OMEGA} (fixed)",

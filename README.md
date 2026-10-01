@@ -329,7 +329,8 @@ the expected crossing region. This is a starting choice, not a universal range:
 vary `--r-min` and `--r-max`, as well as the polynomial degrees and size cuts,
 to check that the estimate is stable. Point selection uses the central values
 and stays fixed in every bootstrap replica. The search
-interval for `beta_c` is the common beta overlap of the selected lattice sizes;
+interval for `beta_c` spans all selected beta values, allowing bootstrap
+minima beyond the narrower common overlap of the lattice sizes;
 it can be overridden with `--beta-min` and `--beta-max`.
 
 At least three distinct lattice sizes must remain after selection. With the
