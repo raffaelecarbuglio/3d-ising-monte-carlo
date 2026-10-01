@@ -8,6 +8,19 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
+def plot_points(axis, data):
+    """Draw L,beta,Rxi,err_Rxi,U,err_U rows, using one color per size."""
+    for i, lattice_size in enumerate(np.unique(data[:, 0])):
+        points = data[data[:, 0] == lattice_size]
+        points = points[np.argsort(points[:, 2])]
+        axis.errorbar(
+            points[:, 2], points[:, 4],
+            xerr=points[:, 3], yerr=points[:, 5],
+            fmt="none", color=f"C{i}", elinewidth=0.8,
+            capsize=2.0, capthick=0.8, label=fr"$L={int(lattice_size)}$",
+        )
+
+
 def main():
     parser = argparse.ArgumentParser(description="Grafico di Binder U in funzione di R_xi")
     parser.add_argument("filename", help="riepilogo prodotto con --summary-output")
@@ -27,20 +40,7 @@ def main():
 
         figure, axis = plt.subplots(figsize=(6.3, 4.7))
 
-        for i, lattice_size in enumerate(np.unique(data[:, 0])):
-            points = data[data[:, 0] == lattice_size]
-            points = points[np.argsort(points[:, 2])]
-
-            axis.errorbar(
-                points[:, 2], points[:, 4],
-                xerr=points[:, 3], yerr=points[:, 5],
-                fmt="none",
-                color=f"C{i}",
-                elinewidth=0.8,
-                capsize=2.0,
-                capthick=0.8,
-                label=fr"$L={int(lattice_size)}$",
-            )
+        plot_points(axis, data)
 
         axis.set_xlabel(r"$R_\xi$", fontsize=13)
         axis.set_ylabel(r"$U$", fontsize=13)

@@ -32,6 +32,7 @@ The code is intentionally compact and readable, with an emphasis on reproducibil
 ├── blocking_plot.py                  blocking-plateau diagnostics
 ├── fit_scaling.py                    finite-size-scaling fit and bootstrap
 ├── fit_beta_c.py                     critical-beta finite-size-scaling fit
+├── compare_universality.py           perturbed data vs correlated clean reference
 ├── plot_u_vs_rxi.py                  U vs R_xi visualization
 ├── run_metropolis.sh                 Metropolis parameter scans
 ├── run_wolff.sh                      Wolff parameter scans
@@ -41,6 +42,7 @@ The code is intentionally compact and readable, with an emphasis on reproducibil
 ├── test_analysis.py                  Python analysis tests
 ├── test_fit_scaling.py               scaling-fit tests
 ├── test_fit_beta_c.py                critical-beta fit tests
+├── test_compare_universality.py       clean-reference and bootstrap tests
 ├── inputs/                           example input files
 ├── plots/                            example diagnostic plots
 └── Makefile
@@ -57,7 +59,8 @@ make
 make test
 ```
 
-The Python analysis requires Python 3, NumPy, and Matplotlib:
+The Python analysis requires Python 3, NumPy, and Matplotlib. The correlated
+clean-reference comparison also uses SciPy:
 
 ```bash
 python3 -m pip install -r requirements.txt
@@ -231,6 +234,46 @@ The script produces:
 
 The fit can be rerun with different lattice-size cuts and polynomial degrees to test stability.
 
+## Clean-versus-perturbed universality comparison
+
+`compare_universality.py` fits the clean blocks to
+`U = P(Rxi) + L^(-omega) Q(Rxi)`, including both coordinate errors and their
+block-jackknife covariance. It compares the perturbed points with the clean
+asymptotic curve without fitting the perturbed data.
+
+```bash
+MPLBACKEND=Agg python3 compare_universality.py \
+    --clean beta_runs_L8-16-24-32 beta_runs_L48-64 beta_runs_L80 \
+    --perturbed "$ORIG_DIR" "$EXTRA_DIR" \
+    --clean-lmin 16 --degree-main 6 --degree-correction 3 \
+    --omega 0.8295 --bootstrap 5000 \
+    --r-min 0.30 --r-max 1.00 --output-prefix sigma05_vs_clean
+```
+
+Inputs must contain `*_blocks.txt` from `analyze.py`, with adequate block sizes.
+All clean points with `L >= 16` enter by default; `--clean-r-min/max` optionally
+restrict them. `--r-min/max` select perturbed points and the plot window.
+Selections stay fixed in bootstrap replicas. Duplicate `(L,beta)` points,
+overlapping ensembles and central points beyond the clean range are rejected.
+
+Blocks are independently resampled in the two ensembles, reconstructing paired
+`Rxi,U` within each run. Each replica refits the clean curve with fixed covariance
+matrices and uses that shared curve for all residuals. Internally Chebyshev
+polynomials on the clean range and `(L/16)^(-omega)` improve conditioning.
+
+Outputs under the prefix:
+
+- `_u_vs_rxi.png/.pdf`: perturbed points and clean curve with pointwise 68% band.
+- `_scaled_delta_u.png/.pdf`: `L^omega [U - U_clean_infinity(Rxi)]` with bootstrap errors.
+- `_points.txt`, `_clean_curve.txt`, `_summary.txt`: numerical results and settings.
+- `_bootstrap.npz`: coefficient/pair/residual replicas, full residual covariance,
+  basis metadata and source paths; point order matches `_points.txt`.
+
+Errors are statistical, conditional on the clean model. Check its fit quality
+and stability before interpretation. Scaled residuals should approach a common
+curve, not necessarily zero; they share reference uncertainty and are correlated.
+Use `--bootstrap 200` for a quick check; progress is printed every 50 replicas.
+
 ## Critical inverse temperature fit
 
 The critical inverse temperature can be estimated from the finite-size scaling of
@@ -363,4 +406,3 @@ The simulation workflow also supports explicit seeds, restartable runs, determin
 ## Project status
 
 This is an active MSc thesis project. The code and analysis are still evolving as additional lattice sizes, perturbations, and scaling tests are studied.
-
