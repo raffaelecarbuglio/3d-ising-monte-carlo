@@ -76,14 +76,8 @@ The default build uses `-O3 -flto` (link-time optimization). Run `make clean`
 before rebuilding after changing compiler flags. To disable LTO, use
 `make CFLAGS='-std=c11 -O3 -Wall -Wextra -Wpedantic'` after cleaning.
 
-Metropolis stores the six-neighbor spin sum at each site. An accepted flip
-updates the six neighboring sums by `-2 * old_spin`; rejected flips need no
-cache updates. The site order and random-number draws are unchanged, including
-for noisy acceptance. This uses one extra `int` per site (about 2 MB at L=80).
-The sums are rebuilt on the first Metropolis sweep after initialization,
-loading a configuration, or a Wolff update. Wolff does not maintain the sums.
-Code that edits `lattice.spins` directly must set `lattice.neighbor_sum_valid = 0`
-before the next Metropolis sweep. Checkpoint and measurement formats are unchanged.
+Metropolis computes the sum of the six neighboring spins directly for each
+proposed flip.
 
 ## Running a simulation
 
@@ -369,3 +363,4 @@ The simulation workflow also supports explicit seeds, restartable runs, determin
 ## Project status
 
 This is an active MSc thesis project. The code and analysis are still evolving as additional lattice sizes, perturbations, and scaling tests are studied.
+

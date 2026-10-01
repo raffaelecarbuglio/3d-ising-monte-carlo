@@ -29,9 +29,7 @@ int ising_create(IsingLattice *lattice, int L)
     lattice->n_spins = L * L * L;
 
     lattice->spins = malloc(lattice->n_spins * sizeof(*lattice->spins));
-    lattice->neighbor_sum = malloc(lattice->n_spins * sizeof(*lattice->neighbor_sum));
-    lattice->neighbor_sum_valid = 0;
-    if (lattice->spins == NULL || lattice->neighbor_sum == NULL) {
+    if (lattice->spins == NULL) {
         fprintf(stderr, "Errore: memoria insufficiente per il reticolo.\n");
         ising_destroy(lattice);
         return 0;
@@ -44,7 +42,6 @@ int ising_create(IsingLattice *lattice, int L)
 void ising_destroy(IsingLattice *lattice)
 {
     free(lattice->spins);
-    free(lattice->neighbor_sum);
     memset(lattice, 0, sizeof(*lattice));
 }
 
@@ -52,7 +49,6 @@ void ising_fill_ordered(IsingLattice *lattice)
 {
     int i;
 
-    lattice->neighbor_sum_valid = 0;
     for (i = 0; i < lattice->n_spins; i++) {
         lattice->spins[i] = 1;
     }
@@ -62,7 +58,6 @@ void ising_fill_random(IsingLattice *lattice, Pcg32 *rng)
 {
     int i;
 
-    lattice->neighbor_sum_valid = 0;
     for (i = 0; i < lattice->n_spins; i++) {
         if (pcg32_bit(rng) == 0) {
             lattice->spins[i] = -1;
@@ -97,19 +92,6 @@ static int ising_neighbor_sum(const IsingLattice *lattice, int x, int y, int z)
          + lattice->spins[ising_index_periodic(lattice, x, y + 1, z)]
          + lattice->spins[ising_index_periodic(lattice, x, y, z - 1)]
          + lattice->spins[ising_index_periodic(lattice, x, y, z + 1)];
-}
-
-static void rebuild_neighbor_sums(IsingLattice *lattice)
-{
-    for (int z = 0; z < lattice->L; z++) {
-        for (int y = 0; y < lattice->L; y++) {
-            for (int x = 0; x < lattice->L; x++) {
-                int index = ising_index(lattice, x, y, z);
-                lattice->neighbor_sum[index] = ising_neighbor_sum(lattice, x, y, z);
-            }
-        }
-    }
-    lattice->neighbor_sum_valid = 1;
 }
 
 int ising_total_energy(const IsingLattice *lattice)
@@ -196,10 +178,6 @@ int ising_metropolis_sweep(IsingLattice *lattice, double beta, double sigma, Pcg
     int y;
     int z;
 
-    if (!lattice->neighbor_sum_valid) {
-        rebuild_neighbor_sums(lattice);
-    }
-
     /* I soli delta E positivi possibili sono 4, 8 e 12. */
     acceptance_probability[1] = exp(-4.0 * beta);
     acceptance_probability[2] = exp(-8.0 * beta);
@@ -222,7 +200,7 @@ int ising_metropolis_sweep(IsingLattice *lattice, double beta, double sigma, Pcg
 
                 /* Per un flip, delta E = 2 s_i moltiplicato per i sei vicini. */
                 delta_energy = 2 * lattice->spins[index]
-                             * lattice->neighbor_sum[index];
+                             * ising_neighbor_sum(lattice, x, y, z);
 
                 if (sigma > 0.0) {
                     /* Il rumore agisce su ogni tentativo, anche per delta E <= 0. */
@@ -234,17 +212,7 @@ int ising_metropolis_sweep(IsingLattice *lattice, double beta, double sigma, Pcg
                              pcg32_uniform(rng) < acceptance_probability[delta_energy / 4];
                 }
                 if (accept) {
-                    int change = -2 * lattice->spins[index];
-
                     lattice->spins[index] = -lattice->spins[index];
-                    /* Cambia solo il contributo s_i ai sei campi vicini.
-                       Per L=2 i vicini coincidono a coppie: contare entrambi. */
-                    lattice->neighbor_sum[ising_index_periodic(lattice, x - 1, y, z)] += change;
-                    lattice->neighbor_sum[ising_index_periodic(lattice, x + 1, y, z)] += change;
-                    lattice->neighbor_sum[ising_index_periodic(lattice, x, y - 1, z)] += change;
-                    lattice->neighbor_sum[ising_index_periodic(lattice, x, y + 1, z)] += change;
-                    lattice->neighbor_sum[ising_index_periodic(lattice, x, y, z - 1)] += change;
-                    lattice->neighbor_sum[ising_index_periodic(lattice, x, y, z + 1)] += change;
                     accepted++;
                 }
             }
@@ -263,8 +231,6 @@ int ising_wolff_update(IsingLattice *lattice, double probability, Pcg32 *rng,
     int i;
 
     initial_index = (int)(pcg32_uniform(rng) * lattice->n_spins);
-    /* Wolff non usa i campi: ricostruirli solo al prossimo sweep Metropolis. */
-    lattice->neighbor_sum_valid = 0;
     cluster_spin = lattice->spins[initial_index];
     cluster[0] = initial_index;
     in_cluster[initial_index] = 1;
@@ -387,7 +353,6 @@ int ising_load_configuration(const char *filename, IsingLattice *lattice,
         return 0;
     }
 
-    lattice->neighbor_sum_valid = 0;
     for (i = 0; i < lattice->n_spins; i++) {
         if (fscanf(file, "%d", &lattice->spins[i]) != 1 ||
             (lattice->spins[i] != -1 && lattice->spins[i] != 1)) {
@@ -401,3 +366,4 @@ int ising_load_configuration(const char *filename, IsingLattice *lattice,
     *production_sweeps = saved_sweeps;
     return 1;
 }
+
