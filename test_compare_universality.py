@@ -1,6 +1,7 @@
 import contextlib
 import io
 import tempfile
+import shutil
 import unittest
 from pathlib import Path
 
@@ -8,9 +9,10 @@ import numpy as np
 from scipy.optimize import minimize
 
 from compare_universality import (
-    basis, bootstrap_comparison, evaluate, fit_clean, jackknife_pair,
-    load_points, main, observable_pairs,
+    bootstrap_comparison, evaluate, jackknife_pair,
+    load_points, load_reference, main, observable_pairs,
 )
+from prepare_clean_reference import basis, fit_clean, main as prepare_main
 from fit_scaling import OMEGA
 
 
@@ -82,71 +84,79 @@ class UniversalityTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             observable_pairs([1, 0, 1, 1], 16)
 
-    def test_shared_reference_adds_cross_point_covariance(self):
-        clean = [make_point(size, r, 2.4 - 0.5*r + 0.05*(size/16)**(-OMEGA), i,
-                            beta=0.22 + i*1e-5)
-                 for i, (size, r) in enumerate((size, r) for size in [16, 32, 64]
-                                               for r in np.linspace(0.3, 1, 6))]
-        # Constant perturbed blocks isolate the shared clean-curve uncertainty.
+    def test_saved_reference_adds_cross_point_covariance(self):
+        # Vary only the reference intercept, isolating its shared uncertainty.
+        samples = np.zeros((30, 11))
+        samples[:, 0] = np.linspace(1.99, 2.01, 30)
         perturbed = [make_point(16, 0.6, 2, 90), make_point(32, 0.6, 2, 91)]
         for point in perturbed:
             point["blocks"][:] = point["blocks"].mean(axis=0)
-        domain = (0.3, 1)
-        c, _, _ = fit_clean(np.array([pt["pair"] for pt in clean]),
-                           np.array([pt["covariance"] for pt in clean]),
-                           [pt["L"] for pt in clean], 1, 0, OMEGA, domain)
         with contextlib.redirect_stdout(io.StringIO()):
-            first = bootstrap_comparison(clean, perturbed, c, 1, 0, OMEGA, domain, 30, 7)
-            second = bootstrap_comparison(clean, perturbed, c, 1, 0, OMEGA, domain, 30, 7)
+            first = bootstrap_comparison(perturbed, samples, (0.3, 1), 7)
+            second = bootstrap_comparison(perturbed, samples, (0.3, 1), 7)
         for a, b in zip(first, second):
             np.testing.assert_array_equal(a, b)
-        self.assertAlmostEqual(np.corrcoef(first[2].T)[0, 1], 1, places=10)
-        np.testing.assert_allclose(first[2][:, 0] / 16**OMEGA,
-                                   first[2][:, 1] / 32**OMEGA, atol=1e-13)
+        self.assertAlmostEqual(np.corrcoef(first[1].T)[0, 1], 1, places=10)
+        np.testing.assert_allclose(first[1][:, 0] / 16**OMEGA,
+                                   first[1][:, 1] / 32**OMEGA, atol=1e-13)
 
-    def test_cli_outputs_and_fixed_all_clean_selection(self):
+    def test_prepare_once_then_compare_without_clean_inputs(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            clean = root / "clean"
-            perturbed = root / "perturbed"
+            clean, perturbed = root / "clean", root / "perturbed"
             clean.mkdir()
             perturbed.mkdir()
-            for i, (size, r) in enumerate((size, r) for size in [16, 32, 64]
-                                         for r in np.linspace(0.28, 1.02, 6)):
+            for i, (size, r) in enumerate((size, r) for size in [8, 16, 32, 64]
+                                         for r in np.linspace(0.28, 1.02, 12)):
                 u = 2.4 - 0.5*r + 0.05*(size/16)**(-OMEGA)
                 save_point(clean / f"{i}_blocks.txt", make_point(size, r, u, i, 0.22+i*1e-5))
             for i, size in enumerate([8, 16, 24, 32]):
                 u = 2.4 - 0.5*0.6 + 0.1*size**(-OMEGA)
                 save_point(perturbed / f"{i}_blocks.txt", make_point(size, 0.6, u, 100+i))
+            cache = root / "clean_reference.npz"
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(prepare_main([str(clean), "--bootstrap", "5", "--output", str(cache)]), 0)
+            ref = load_reference(cache)
+            self.assertEqual(len(ref["clean_paths"]), 36)  # all L>=16, including edge points
+            original_cache = cache.read_bytes()
+            shutil.rmtree(clean)  # comparison must work with no clean blocks available
             prefix = root / "output" / "comparison"
-            argv = ["--clean", str(clean), "--perturbed", str(perturbed),
-                    "--degree-main", "1", "--degree-correction", "0",
-                    "--bootstrap", "5", "--output-prefix", str(prefix)]
+            argv = ["--reference", str(cache), "--perturbed", str(perturbed),
+                    "--output-prefix", str(prefix)]
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(main(argv), 0)
+            self.assertEqual(cache.read_bytes(), original_cache)
             summary = Path(f"{prefix}_summary.txt").read_text()
-            self.assertIn("clean points = 18; perturbed points = 4", summary)
+            self.assertIn("clean points = 36; perturbed points = 4", summary)
             rows = np.loadtxt(f"{prefix}_points.txt")
             np.testing.assert_allclose(rows[:, 9], 0.1, atol=1e-9)
             self.assertTrue(np.all(rows[:, 10] > 0))
             with np.load(f"{prefix}_bootstrap.npz") as archive:
                 self.assertEqual(archive["scaled_delta_U_covariance"].shape, (4, 4))
                 self.assertEqual(archive["perturbed_pairs"].shape, (5, 4, 2))
+                np.testing.assert_array_equal(archive["clean_coefficients"], ref["clean_coefficients"])
             for suffix in ("u_vs_rxi", "scaled_delta_u"):
                 for extension in ("png", "pdf"):
                     self.assertGreater(Path(f"{prefix}_{suffix}.{extension}").stat().st_size, 1000)
-            # Resolved overlapping inputs do not count the same file twice.
-            self.assertEqual(len(load_points([clean, clean / "0_blocks.txt"])), 18)
-            # Distinct copies and mismatched headers are rejected explicitly.
-            copy = clean / "copy_blocks.txt"
-            copy.write_bytes((clean / "0_blocks.txt").read_bytes())
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(main(argv + ["--bootstrap", "6"]), 1)
+                with self.assertRaises(SystemExit):
+                    main(argv + ["--clean-lmin", "8"])
+            self.assertEqual(len(load_points([perturbed, perturbed / "0_blocks.txt"])), 4)
+            copy = perturbed / "copy_blocks.txt"
+            copy.write_bytes((perturbed / "0_blocks.txt").read_bytes())
             with self.assertRaisesRegex(ValueError, "duplicate L,beta"):
-                load_points([clean])
+                load_points([perturbed])
             copy.unlink()
             bad = perturbed / "0_blocks.txt"
             bad.write_text(bad.read_text().replace("# err_U =", "# old_err_U ="))
             with contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(main(argv), 1)
+            for key, bad_value in (("clean_lmin", 8), ("omega", 0.8), ("degree_main", 5),
+                                   ("r_min", 0.4), ("clean_coefficients", np.full((5, 11), np.nan))):
+                np.savez(cache, **dict(ref, **{key: bad_value}))
+                with self.assertRaises(ValueError):
+                    load_reference(cache)
 
 
 if __name__ == "__main__":

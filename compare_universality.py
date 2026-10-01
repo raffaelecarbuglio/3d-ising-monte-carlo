@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Compare perturbed U(Rxi,L) with a correlated clean scaling fit.
-
-Only the clean data are fitted. Independent block bootstraps propagate the
-uncertainty of that reference into every perturbed residual.
-"""
+"""Compare perturbed U(Rxi,L) with a saved clean Wolff reference."""
 
 import argparse
 import sys
@@ -11,10 +7,12 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.optimize import least_squares
 
 from fit_scaling import OMEGA, bootstrap_pair, find_block_files, observable_pairs, read_block_file
 from plot_u_vs_rxi import plot_points
+
+CLEAN_LMIN, DEGREE_MAIN, DEGREE_CORRECTION = 16, 6, 3
+R_MIN, R_MAX = 0.30, 1.00
 
 
 def jackknife_pair(point):
@@ -70,17 +68,6 @@ def load_points(inputs, lmin=2, sizes=None, rmin=None, rmax=None):
     return points
 
 
-def basis(r, sizes, p, q, omega, domain):
-    """Chebyshev basis: same polynomial space, better numerical conditioning."""
-    low, high = domain
-    t = (2 * np.asarray(r) - low - high) / (high - low)
-    main = np.polynomial.chebyshev.chebvander(t, p)
-    correction = np.polynomial.chebyshev.chebvander(t, q)
-    # Normalizing L at 16 changes only the correction coefficients.
-    factor = (np.asarray(sizes, dtype=float) / 16) ** (-omega)
-    return np.column_stack((main, factor[:, None] * correction))
-
-
 def evaluate(coefficients, r, p, domain, sizes=None, omega=OMEGA):
     low, high = domain
     t = (2 * np.asarray(r) - low - high) / (high - low)
@@ -92,97 +79,53 @@ def evaluate(coefficients, r, p, domain, sizes=None, omega=OMEGA):
     return result
 
 
-def derivative(coefficients, r, sizes, p, omega, domain):
-    t = (2 * np.asarray(r) - sum(domain)) / (domain[1] - domain[0])
-    dmain = np.polynomial.chebyshev.chebder(coefficients[:p + 1])
-    dcorr = np.polynomial.chebyshev.chebder(coefficients[p + 1:])
-    return 2 / (domain[1] - domain[0]) * (
-        np.polynomial.chebyshev.chebval(t, dmain)
-        + (np.asarray(sizes) / 16) ** (-omega) * np.polynomial.chebyshev.chebval(t, dcorr)
-    )
-
-
-def fit_clean(pairs, covariances, sizes, p, q, omega, domain, initial=None):
-    """Minimize sum (observed-model)^T C^-1 (observed-model).
-
-    There is one fitted true abscissa per clean point. Covariances stay fixed
-    to their original block-jackknife estimates, including in bootstrap fits.
-    """
-    pairs, covariances = np.asarray(pairs), np.asarray(covariances)
-    sizes = np.asarray(sizes, dtype=float)
-    n, k = len(pairs), p + q + 2
-    if len(np.unique(sizes)) < 2 or n <= k:
-        raise ValueError("clean fit requires at least two sizes and more points than coefficients")
-    sx = np.sqrt(covariances[:, 0, 0])
-    cross = covariances[:, 1, 0] / sx
-    conditional = np.sqrt(covariances[:, 1, 1] - cross**2)
-    if not np.isfinite(conditional).all() or np.any(conditional <= 0):
-        raise ValueError("clean covariance matrices must be positive definite")
-    matrix = basis(pairs[:, 0], sizes, p, q, omega, domain)
-    weighted = matrix / np.sqrt(covariances[:, 1, 1])[:, None]
-    coefficients, _, rank, _ = np.linalg.lstsq(
-        weighted, pairs[:, 1] / np.sqrt(covariances[:, 1, 1]), rcond=None
-    )
-    if rank < k:
-        raise ValueError("singular clean fit: reduce polynomial degrees")
-    if initial is not None:
-        coefficients = initial
-
-    def residual(parameters):
-        c, true_r = parameters[:k], parameters[k:]
-        dx = (pairs[:, 0] - true_r) / sx
-        dy = (pairs[:, 1] - evaluate(c, true_r, p, domain, sizes, omega) - cross * dx) / conditional
-        return np.concatenate((dx, dy))
-
-    def jacobian(parameters):
-        c, true_r = parameters[:k], parameters[k:]
-        jac = np.zeros((2 * n, k + n))
-        jac[np.arange(n), k + np.arange(n)] = -1 / sx
-        jac[n:, :k] = -basis(true_r, sizes, p, q, omega, domain) / conditional[:, None]
-        jac[n + np.arange(n), k + np.arange(n)] = (
-            -derivative(c, true_r, sizes, p, omega, domain) + cross / sx
-        ) / conditional
-        return jac
-
-    solution = least_squares(
-        residual, np.r_[coefficients, pairs[:, 0]], jac=jacobian, method="lm",
-        x_scale="jac", ftol=1e-10, xtol=1e-10, gtol=1e-10, max_nfev=300,
-    )
-    if not solution.success or not np.isfinite(solution.x).all():
-        raise ValueError(f"clean EIV fit failed: {solution.message}")
-    if np.linalg.matrix_rank(solution.jac) < k + n:
-        raise ValueError("singular clean EIV fit")
-    return solution.x[:k], float(solution.fun @ solution.fun), n - k
-
-
 def resample_pairs(points, rng):
     return np.array([bootstrap_pair(point, rng) for point in points])
 
 
-def bootstrap_comparison(clean, perturbed, coefficients, p, q, omega, domain, replicas, seed):
-    # Separate streams keep the two independently simulated ensembles independent.
-    streams = np.random.SeedSequence(seed).spawn(2)
-    clean_rng, perturbed_rng = [np.random.default_rng(stream) for stream in streams]
-    sizes = np.array([point["L"] for point in clean])
-    covariance = np.array([point["covariance"] for point in clean])
-    factors = np.array([point["L"] for point in perturbed]) ** omega
-    coefficient_samples = np.empty((replicas, len(coefficients)))
-    pair_samples = np.empty((replicas, len(perturbed), 2))
-    delta_samples = np.empty((replicas, len(perturbed)))
-    for b in range(replicas):
-        try:
-            sampled_clean = resample_pairs(clean, clean_rng)
-            c, _, _ = fit_clean(sampled_clean, covariance, sizes, p, q, omega, domain, coefficients)
-            pairs = resample_pairs(perturbed, perturbed_rng)
-        except (ValueError, np.linalg.LinAlgError) as error:
-            raise ValueError(f"bootstrap {b + 1}/{replicas}: {error}") from error
-        coefficient_samples[b] = c
+def load_reference(filename):
+    keys = ("coefficients", "clean_coefficients", "chebyshev_domain", "clean_paths",
+            "clean_lmin", "degree_main", "degree_correction", "omega", "r_min", "r_max",
+            "chi2", "dof", "seed", "correction_size_normalization")
+    try:
+        with np.load(filename, allow_pickle=False) as archive:
+            reference = {key: archive[key] for key in keys}
+    except KeyError as error:
+        raise ValueError("incomplete reference; generate it with prepare_clean_reference.py") from error
+    settings = dict(clean_lmin=CLEAN_LMIN, degree_main=DEGREE_MAIN,
+                    degree_correction=DEGREE_CORRECTION, omega=OMEGA,
+                    r_min=R_MIN, r_max=R_MAX, correction_size_normalization=16)
+    for name, expected in settings.items():
+        if reference[name].ndim != 0 or reference[name] != expected:
+            raise ValueError(f"reference {name} must be {expected}")
+    c, samples, domain = [reference[key] for key in
+                          ("coefficients", "clean_coefficients", "chebyshev_domain")]
+    if (c.shape != (DEGREE_MAIN + DEGREE_CORRECTION + 2,) or samples.ndim != 2
+            or samples.shape[1:] != c.shape or len(samples) < 2
+            or domain.shape != (2,) or not domain[0] < domain[1]
+            or not all(np.isfinite(value).all() for value in (c, samples, domain))):
+        raise ValueError("invalid reference coefficients, replicas or domain")
+    if (reference["chi2"].ndim != 0 or not np.isfinite(reference["chi2"])
+            or reference["chi2"] < 0 or reference["dof"].ndim != 0 or reference["dof"] <= 0
+            or not np.isfinite(reference["dof"]) or reference["clean_paths"].ndim != 1
+            or not len(reference["clean_paths"])):
+        raise ValueError("invalid reference fit metadata")
+    return reference
+
+
+def bootstrap_comparison(perturbed, samples, domain, seed):
+    rng = np.random.default_rng(np.random.SeedSequence(seed).spawn(2)[1])
+    factors = np.array([point["L"] for point in perturbed]) ** OMEGA
+    pair_samples = np.empty((len(samples), len(perturbed), 2))
+    delta_samples = np.empty((len(samples), len(perturbed)))
+    for b, coefficients in enumerate(samples):
+        pairs = resample_pairs(perturbed, rng)
         pair_samples[b] = pairs
-        # One shared clean replica for ALL perturbed points in this replica.
-        delta_samples[b] = factors * (pairs[:, 1] - evaluate(c, pairs[:, 0], p, domain))
-        if (b + 1) % 50 == 0 or b + 1 == replicas:
-            print(f"bootstrap {b + 1}/{replicas}", flush=True)
-    return coefficient_samples, pair_samples, delta_samples
+        # The same saved clean replica is shared by ALL perturbed points.
+        delta_samples[b] = factors * (pairs[:, 1] - evaluate(coefficients, pairs[:, 0], DEGREE_MAIN, domain))
+        if (b + 1) % 50 == 0 or b + 1 == len(samples):
+            print(f"bootstrap {b + 1}/{len(samples)}", flush=True)
+    return pair_samples, delta_samples
 
 
 def save_plots(points, grid, reference, low, high, scaled, scaled_errors, prefix):
@@ -216,101 +159,73 @@ def save_plots(points, grid, reference, low, high, scaled, scaled_errors, prefix
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--clean", nargs="+", required=True, help="clean block files or directories")
-    parser.add_argument("--perturbed", nargs="+", required=True, help="perturbed block files or directories")
-    parser.add_argument("--clean-lmin", type=int, default=16)
-    parser.add_argument("--clean-r-min", type=float, help="optional clean-fit cut; default uses all clean points")
-    parser.add_argument("--clean-r-max", type=float, help="optional clean-fit cut; default uses all clean points")
+    parser.add_argument("--reference", default="clean_reference.npz")
+    parser.add_argument("--perturbed", nargs="+", required=True, help="block files or directories")
     parser.add_argument("--perturbed-sizes", nargs="+", type=int)
-    parser.add_argument("--degree-main", type=int, default=6)
-    parser.add_argument("--degree-correction", type=int, default=3)
-    parser.add_argument("--omega", type=float, default=OMEGA)
-    parser.add_argument("--bootstrap", type=int, default=5000)
+    parser.add_argument("--bootstrap", type=int, help="use the first N saved replicas; default uses all")
     parser.add_argument("--seed", type=int, default=12345)
-    parser.add_argument("--r-min", type=float, default=0.30, help="perturbed selection and plotting window")
-    parser.add_argument("--r-max", type=float, default=1.00, help="perturbed selection and plotting window")
     parser.add_argument("--output-prefix", default="universality")
     args = parser.parse_args(argv)
     try:
-        if args.degree_main < 0 or args.degree_correction < 0 or args.bootstrap < 2:
-            raise ValueError("nonnegative degrees and at least two bootstrap replicas are required")
-        if (not np.isfinite([args.r_min, args.r_max, args.omega]).all()
-                or args.r_min >= args.r_max or args.omega <= 0 or args.clean_lmin < 2 or args.seed < 0):
-            raise ValueError("invalid window, omega, clean-lmin or seed")
-        for cut in (args.clean_r_min, args.clean_r_max):
-            if cut is not None and not np.isfinite(cut):
-                raise ValueError("clean Rxi cuts must be finite")
-        if (args.clean_r_min is not None and args.clean_r_max is not None
-                and args.clean_r_min >= args.clean_r_max):
-            raise ValueError("clean-r-min must be smaller than clean-r-max")
-        clean = load_points(args.clean, args.clean_lmin, rmin=args.clean_r_min, rmax=args.clean_r_max)
-        perturbed = load_points(args.perturbed, sizes=args.perturbed_sizes,
-                                rmin=args.r_min, rmax=args.r_max)
-        if {point["path"] for point in clean} & {point["path"] for point in perturbed}:
-            raise ValueError("clean and perturbed inputs must be independent, disjoint ensembles")
-        pairs = np.array([point["pair"] for point in clean])
-        covariance = np.array([point["covariance"] for point in clean])
-        sizes = np.array([point["L"] for point in clean])
-        domain = (float(pairs[:, 0].min()), float(pairs[:, 0].max()))
+        ref = load_reference(args.reference)
+        replicas = len(ref["clean_coefficients"]) if args.bootstrap is None else args.bootstrap
+        if not 2 <= replicas <= len(ref["clean_coefficients"]) or args.seed < 0:
+            raise ValueError("request 2..N saved replicas and a nonnegative seed; prepare more if needed")
+        samples = ref["clean_coefficients"][:replicas]
+        coefficients, domain = ref["coefficients"], ref["chebyshev_domain"]
+        perturbed = load_points(args.perturbed, sizes=args.perturbed_sizes, rmin=R_MIN, rmax=R_MAX)
+        if set(ref["clean_paths"]) & {str(point["path"]) for point in perturbed}:
+            raise ValueError("clean and perturbed inputs must be disjoint, independent ensembles")
         measured = np.array([point["pair"] for point in perturbed])
         errors = np.sqrt([np.diag(point["covariance"]) for point in perturbed])
+        sizes = np.array([point["L"] for point in perturbed])
         if np.any(measured[:, 0] < domain[0]) or np.any(measured[:, 0] > domain[1]):
-            raise ValueError("perturbed central points extend beyond the clean reference range; "
-                             "narrow --r-min/--r-max or extend the clean data")
-        coefficients, chi2, dof = fit_clean(
-            pairs, covariance, sizes, args.degree_main, args.degree_correction, args.omega, domain
-        )
-        print(f"clean points = {len(clean)}; perturbed points = {len(perturbed)}", flush=True)
-        print(f"clean chi2/dof = {chi2:.8g}/{dof} = {chi2/dof:.8g}", flush=True)
-        if chi2 / dof > 2:
-            print("Warning: assess clean fit quality and stability before interpreting the comparison.",
-                  file=sys.stderr, flush=True)
-        samples, pair_samples, scaled_samples = bootstrap_comparison(
-            clean, perturbed, coefficients, args.degree_main, args.degree_correction,
-            args.omega, domain, args.bootstrap, args.seed,
-        )
-        grid = np.linspace(max(args.r_min, domain[0]), min(args.r_max, domain[1]), 300)
-        reference = evaluate(coefficients, grid, args.degree_main, domain)
-        curves = np.array([evaluate(c, grid, args.degree_main, domain) for c in samples])
-        low, high = np.percentile(curves, [16, 84], axis=0)
-        perturbed_sizes = np.array([point["L"] for point in perturbed])
-        reference_at_points = evaluate(coefficients, measured[:, 0], args.degree_main, domain)
-        delta = measured[:, 1] - reference_at_points
-        scaled = perturbed_sizes ** args.omega * delta
-        scaled_errors = scaled_samples.std(axis=0, ddof=1)
-        scaled_covariance = np.atleast_2d(np.cov(scaled_samples, rowvar=False, ddof=1))
+            raise ValueError("perturbed central points extend beyond the saved clean reference range")
         prefix = Path(args.output_prefix)
+        if Path(f"{prefix}_bootstrap.npz").resolve() == Path(args.reference).resolve():
+            raise ValueError("output would overwrite the clean reference; choose another prefix")
+        chi2, dof = float(ref["chi2"]), int(ref["dof"])
+        print(f"loaded clean reference: {args.reference}; chi2/dof = {chi2:.8g}/{dof} = {chi2/dof:.8g}")
+        if chi2 / dof > 2:
+            print("Warning: assess clean fit quality before interpreting the comparison.", file=sys.stderr)
+        pair_samples, scaled_samples = bootstrap_comparison(perturbed, samples, domain, args.seed)
+        grid = np.linspace(max(R_MIN, domain[0]), min(R_MAX, domain[1]), 300)
+        reference = evaluate(coefficients, grid, DEGREE_MAIN, domain)
+        curves = np.array([evaluate(c, grid, DEGREE_MAIN, domain) for c in samples])
+        low, high = np.percentile(curves, [16, 84], axis=0)
+        reference_at_points = evaluate(coefficients, measured[:, 0], DEGREE_MAIN, domain)
+        delta = measured[:, 1] - reference_at_points
+        scaled = sizes ** OMEGA * delta
+        scaled_errors = scaled_samples.std(axis=0, ddof=1)
         prefix.parent.mkdir(parents=True, exist_ok=True)
         np.savetxt(f"{prefix}_points.txt", np.column_stack((
-            perturbed_sizes, [point["beta"] for point in perturbed], measured[:, 0],
-            errors[:, 0], measured[:, 1], errors[:, 1], reference_at_points,
-            delta, scaled_errors / perturbed_sizes**args.omega, scaled, scaled_errors,
+            sizes, [point["beta"] for point in perturbed], measured[:, 0], errors[:, 0],
+            measured[:, 1], errors[:, 1], reference_at_points, delta,
+            scaled_errors / sizes**OMEGA, scaled, scaled_errors,
         )), header="L beta Rxi err_Rxi U err_U U_clean delta_U err_delta_U scaled_delta_U err_scaled_delta_U")
         np.savetxt(f"{prefix}_clean_curve.txt", np.column_stack((grid, reference, low, high)),
                    header="Rxi U_clean low_68 high_68")
         np.savez_compressed(
             f"{prefix}_bootstrap.npz", coefficients=coefficients, clean_coefficients=samples,
-            chebyshev_domain=domain, degree_main=args.degree_main, degree_correction=args.degree_correction,
-            omega=args.omega, correction_size_normalization=16, seed=args.seed,
-            perturbed_pairs=pair_samples, scaled_delta_U=scaled_samples,
-            scaled_delta_U_covariance=scaled_covariance,
-            clean_paths=[str(point["path"]) for point in clean],
-            perturbed_paths=[str(point["path"]) for point in perturbed],
+            chebyshev_domain=domain, degree_main=DEGREE_MAIN, degree_correction=DEGREE_CORRECTION,
+            omega=OMEGA, correction_size_normalization=16, clean_lmin=CLEAN_LMIN,
+            r_min=R_MIN, r_max=R_MAX, chi2=chi2, dof=dof, reference_seed=ref["seed"], seed=args.seed,
+            reference_file=str(Path(args.reference).resolve()), perturbed_pairs=pair_samples,
+            scaled_delta_U=scaled_samples,
+            scaled_delta_U_covariance=np.atleast_2d(np.cov(scaled_samples, rowvar=False, ddof=1)),
+            clean_paths=ref["clean_paths"], perturbed_paths=[str(point["path"]) for point in perturbed],
         )
         with open(f"{prefix}_summary.txt", "w", encoding="utf-8") as file:
-            file.write("Clean model: U = P(Rxi) + (L/16)^(-omega) Q(Rxi)\n"
-                       "Correlated EIV fit; fixed block-jackknife covariance.\n"
-                       "Fixed selections; independent clean/perturbed block resampling.\n"
-                       "Paired Rxi,U within runs; one shared clean curve per replica.\n"
-                       "Statistical errors conditional on the clean model; no perturbed fit.\n"
-                       "Chebyshev basis on clean range; full residual covariance in NPZ.\n")
+            file.write("Saved correlated clean reference; no clean fit or clean resampling in this run.\n"
+                       "Fixed selections; perturbed Rxi,U paired; one shared clean replica per bootstrap.\n"
+                       "Statistical errors conditional on the clean model; full residual covariance in NPZ.\n"
+                       f"clean_lmin = {CLEAN_LMIN}; degrees = {DEGREE_MAIN}, {DEGREE_CORRECTION}\n"
+                       f"omega = {OMEGA}; perturbed window = {R_MIN}, {R_MAX}\n"
+                       f"clean chi2/dof = {chi2:.10g}/{dof} = {chi2/dof:.10g}\n"
+                       f"clean points = {len(ref['clean_paths'])}; perturbed points = {len(perturbed)}\n"
+                       f"bootstrap replicas = {replicas}; reference seed = {int(ref['seed'])}\n")
             for name, value in vars(args).items():
                 file.write(f"{name} = {value}\n")
-            file.write(f"clean observed Rxi range = {domain}\n"
-                       f"clean points = {len(clean)}; perturbed points = {len(perturbed)}\n"
-                       f"clean chi2/dof = {chi2:.10g}/{dof} = {chi2/dof:.10g}\n")
-            np.savetxt(file, np.column_stack((coefficients, samples.std(axis=0, ddof=1))),
-                       header="P0..Pp then Q0..Qq: coefficient bootstrap_std")
         save_plots(perturbed, grid, reference, low, high, scaled, scaled_errors, prefix)
     except (OSError, ValueError, np.linalg.LinAlgError) as error:
         print(f"Error: {error}", file=sys.stderr)
