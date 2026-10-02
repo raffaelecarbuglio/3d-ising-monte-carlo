@@ -300,7 +300,15 @@ PIDS=()
 PID_NAMES=()
 PID_LOGS=()
 
-for ((idx=0; idx<TOTAL_RUNS; idx++)); do
+# Estimate longer runs by larger L, then higher beta (larger clusters).
+# Sort launch indices only, keeping each run's original seed and input.
+mapfile -t RUN_ORDER < <(
+    awk -F',' 'NR > 1 { print NR - 2, $2, $3 }' "$CSV_FILE" |
+        sort -s -k2,2nr -k3,3nr |
+        awk '{ print $1 }'
+)
+
+for idx in "${RUN_ORDER[@]}"; do
 
     while (( $(jobs -pr | wc -l) >= MAX_JOBS )); do
         sleep 1
