@@ -278,12 +278,21 @@ int ising_save_configuration(const char *filename, const IsingLattice *lattice,
                              int production_sweeps)
 {
     FILE *file;
+    char *temporary_filename;
     int i;
     int ok = 1;
 
-    file = fopen(filename, "w");
+    /* Scrivi prima un file temporaneo nello stesso percorso del salvataggio. */
+    temporary_filename = malloc(strlen(filename) + sizeof(".tmp"));
+    if (temporary_filename == NULL) {
+        fprintf(stderr, "Errore: memoria insufficiente per il salvataggio.\n");
+        return 0;
+    }
+    sprintf(temporary_filename, "%s.tmp", filename);
+    file = fopen(temporary_filename, "w");
     if (file == NULL) {
         fprintf(stderr, "Errore: impossibile scrivere la configurazione '%s'.\n", filename);
+        free(temporary_filename);
         return 0;
     }
 
@@ -312,6 +321,15 @@ int ising_save_configuration(const char *filename, const IsingLattice *lattice,
         ok = 0;
     }
 
+    /* Sostituisci il salvataggio precedente solo dopo una scrittura completa. */
+    if (ok && rename(temporary_filename, filename) != 0) {
+        fprintf(stderr, "Errore durante la sostituzione di '%s'.\n", filename);
+        ok = 0;
+    }
+    if (!ok) {
+        remove(temporary_filename);
+    }
+    free(temporary_filename);
     return ok;
 }
 

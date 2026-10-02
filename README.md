@@ -124,7 +124,9 @@ For Wolff, one "sweep" in the present implementation means one cluster update.
 
 ## Restartable runs
 
-A completed segment writes a checkpoint containing the lattice configuration and the number of production sweeps already completed. A later run can continue from that configuration:
+Each run saves the lattice configuration and completed production-sweep count every 100,000 production sweeps, and again at normal completion. The interval is fixed by `save_every` in `main.c`; no input setting is required. Thermalization sweeps are not counted. For Wolff, the interval counts cluster updates.
+
+Each save replaces `config_file` through a temporary file in the same directory, after the write and close succeed. Measurements are flushed before periodic saves. The configuration format is unchanged, so a later run can continue from that configuration:
 
 ```bash
 ./ising inputs/input_restart_example.dat
@@ -132,7 +134,7 @@ A completed segment writes a checkpoint containing the lattice configuration and
 
 On restart, new measurements are appended to the existing data file and the production-sweep counter continues from the previous segment. The random-number generator is initialized from the new seed supplied in the restart input.
 
-This makes long simulations easier to split into independent execution segments while keeping the output continuous and reproducible.
+After an interruption, the measurement file may contain rows beyond the saved production-sweep count. Before appending a restart, manually remove those later rows, or use a new `data_file`. The program does not truncate measurements or save the random-number generator state, so restarting does not reproduce the interrupted trajectory exactly.
 
 ## Stored measurements
 
