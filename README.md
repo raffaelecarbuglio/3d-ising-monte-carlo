@@ -403,6 +403,10 @@ SIGMA=0.5 ./run_metropolis.sh inputs/input_example.dat
 ```
 
 The scripts generate independent inputs and seeds and can run multiple simulations concurrently.
+Both launch larger lattices first to reduce the time spent waiting for a few
+long runs at the end of a batch. Within each size, Wolff launches higher beta
+first, where clusters are generally larger. This is a runtime estimate, not a
+measured ordering. Launch order does not change the seed assigned to a run.
 
 ## Reproducibility and validation
 
