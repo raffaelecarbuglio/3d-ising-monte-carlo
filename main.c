@@ -165,6 +165,7 @@ static int write_measurement(FILE *file, const IsingLattice *lattice,
 
 static int run_simulation(const SimulationParameters *p)
 {
+    const int save_every = 100000;
     IsingLattice lattice;
     Pcg32 rng;
     FILE *data;
@@ -256,6 +257,20 @@ static int run_simulation(const SimulationParameters *p)
             if (!write_measurement(data, &lattice, previous_sweeps + sweep,
                                    cos_table, sin_table)) {
                 fprintf(stderr, "Errore durante la scrittura delle misure.\n");
+                ok = 0;
+                break;
+            }
+        }
+
+        /* Salva gli spin e il contatore ogni save_every sweep di produzione. */
+        if (sweep % save_every == 0) {
+            if (fflush(data) != 0) {
+                fprintf(stderr, "Errore durante la scrittura delle misure.\n");
+                ok = 0;
+                break;
+            }
+            if (!ising_save_configuration(p->config_file, &lattice,
+                                          previous_sweeps + sweep)) {
                 ok = 0;
                 break;
             }
