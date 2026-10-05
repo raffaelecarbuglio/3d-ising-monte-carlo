@@ -1,12 +1,15 @@
 import gzip
+import io
 import math
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 
 from analyze import (
+    analyze_streaming,
     block_jackknife,
     calculate_block_averages,
     calculate_binder,
@@ -63,6 +66,84 @@ def brute_force_block_jackknife(data, lattice_size, beta, block_size):
 
 
 class AnalysisTests(unittest.TestCase):
+    def test_streaming_matches_full_array_and_brute_force(self):
+        rng = np.random.default_rng(17)
+        count = 67
+        energy = rng.integers(-96, -20, count) * 2
+        magnetization = rng.integers(-32, 33, count) * 2
+        g_min = rng.uniform(0.5, 1.5, count)
+        compact = np.column_stack((np.arange(count), energy, magnetization, g_min))
+        legacy = np.column_stack((np.arange(count), energy / 64,
+                                  magnetization / 64, np.abs(magnetization / 64),
+                                  np.full(count, 0.5), magnetization**2 / 64, g_min))
+        with tempfile.TemporaryDirectory() as directory:
+            for rows in (compact, legacy):
+                buffer = io.StringIO()
+                np.savetxt(buffer, rows, fmt="%.17g")
+                lines = buffer.getvalue().splitlines()
+                contents = "# L = 4\n# beta = 0.22\n" + "\n".join(
+                    line + ("\n\n  # restart information\n" if i % 7 == 0 else "")
+                    for i, line in enumerate(lines)
+                ) + "\n"
+                for suffix in (".dat", ".dat.gz"):
+                    filename = Path(directory) / ("run" + suffix)
+                    opener = gzip.open if suffix.endswith(".gz") else open
+                    with opener(filename, "wt") as file:
+                        file.write(contents)
+                    size, beta, data = read_data_file(filename)
+                    for block in (1, 3, 8, 23):
+                        expected = brute_force_block_jackknife(data, size, beta, block)
+                        expected_blocks = calculate_block_averages(data, block)
+                        for chunk in (1, 7, 23, 100_000):
+                            with self.subTest(columns=rows.shape[1], suffix=suffix,
+                                              block=block, chunk=chunk):
+                                with patch("analyze.read_data_file", side_effect=AssertionError("full read")):
+                                    streamed = analyze_streaming(filename, block, chunk)
+                                self.assertEqual(streamed[:3], (size, beta, len(data)))
+                                self.assertEqual(streamed[3][2:], expected[2:])
+                                for actual, reference in zip(streamed[3][:2], expected[:2]):
+                                    self.assertEqual(actual.keys(), reference.keys())
+                                    np.testing.assert_allclose(list(actual.values()), list(reference.values()),
+                                                               rtol=1e-12, atol=1e-14)
+                                np.testing.assert_array_equal(streamed[4], expected_blocks)
+
+    def test_streaming_default_chunks_and_final_tail(self):
+        contents = "# L = 4\n# beta = 0.22\n" + "1 -64 32 1\n" * 200_001
+        with tempfile.TemporaryDirectory() as directory:
+            filename = Path(directory) / "run.dat"
+            filename.write_text(contents)
+            original = np.loadtxt
+            rows_read = []
+            def recording_loadtxt(lines, **kwargs):
+                rows_read.append(len(lines))
+                return original(lines, **kwargs)
+            with patch("analyze.np.loadtxt", side_effect=recording_loadtxt):
+                result = analyze_streaming(filename, 2000)
+            self.assertEqual(rows_read, [100_000, 100_000, 1])
+            self.assertEqual(result[3][2:], (100, 200_000, 1))
+
+    def test_streaming_errors_in_later_chunks(self):
+        header = "# L = 4\n# beta = 0.22\n"
+        rows = "1 -64 32 1\n2 -128 -48 2\n"
+        with tempfile.TemporaryDirectory() as directory:
+            filename = Path(directory) / "run.dat"
+            filename.write_text(header + rows + "bad data\n")
+            with self.assertRaisesRegex(ValueError, "numerici"):
+                analyze_streaming(filename, 1, 2)
+            filename.write_text(header + rows + "3 -1 0.5 0.5 0.4 16 1\n")
+            with self.assertRaisesRegex(ValueError, "colonne"):
+                analyze_streaming(filename, 1, 2)
+            filename.write_text(header)
+            with self.assertRaisesRegex(ValueError, "non contiene misure"):
+                analyze_streaming(filename, 1, 2)
+            filename.write_text(header + rows)
+            with self.assertRaisesRegex(ValueError, "almeno 2"):
+                analyze_streaming(filename, 2, 1)
+            with self.assertRaisesRegex(ValueError, "positivo"):
+                analyze_streaming(filename, 0)
+            with self.assertRaisesRegex(ValueError, "positivo"):
+                analyze_streaming(filename, 1, 0)
+
     def test_binder(self):
         magnetization = np.array([1.0, -1.0, 2.0, -2.0])
         self.assertAlmostEqual(calculate_binder(magnetization), 1.36)
