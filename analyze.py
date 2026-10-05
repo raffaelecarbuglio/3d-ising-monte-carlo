@@ -2,6 +2,7 @@
 
 import argparse
 import gzip
+from itertools import islice
 import math
 import sys
 
@@ -15,7 +16,7 @@ G_ZERO = 4
 G_MIN = 5
 
 
-def read_data_file(filename):
+def read_header(filename):
     lattice_size = None
     beta = None
 
@@ -44,11 +45,10 @@ def read_data_file(filename):
     if beta is None:
         raise ValueError("beta non trovato nell'intestazione del file")
 
-    try:
-        data = np.loadtxt(filename, comments="#", ndmin=2)
-    except ValueError as error:
-        raise ValueError("dati numerici non validi") from error
+    return lattice_size, beta
 
+
+def normalize_data(data, lattice_size):
     if data.size == 0:
         raise ValueError("il file non contiene misure")
     if data.shape[1] == 4:
@@ -69,7 +69,38 @@ def read_data_file(filename):
             f"il file deve avere 4 o 7 colonne numeriche, ne ha {data.shape[1]}"
         )
 
-    return lattice_size, beta, data
+    return data
+
+
+def read_data_file(filename):
+    lattice_size, beta = read_header(filename)
+    try:
+        data = np.loadtxt(filename, comments="#", ndmin=2)
+    except ValueError as error:
+        raise ValueError("dati numerici non validi") from error
+    return lattice_size, beta, normalize_data(data, lattice_size)
+
+
+def read_data_chunks(filename, lattice_size, chunk_rows):
+    open_file = gzip.open if str(filename).endswith(".gz") else open
+    columns = None
+    with open_file(filename, "rt", encoding="utf-8") as file:
+        # Conta misure, non righe di commento o righe vuote.
+        rows = (line for line in file
+                if not line.isspace() and not line.lstrip().startswith("#"))
+        while True:
+            lines = list(islice(rows, chunk_rows))
+            if not lines:
+                break
+            try:
+                data = np.loadtxt(lines, comments="#", ndmin=2)
+            except ValueError as error:
+                raise ValueError("dati numerici non validi") from error
+            del lines
+            if columns is not None and data.shape[1] != columns:
+                raise ValueError("numero di colonne cambiato nel file delle misure")
+            columns = data.shape[1]
+            yield normalize_data(data, lattice_size)
 
 
 def calculate_binder(magnetization):
@@ -137,28 +168,30 @@ def jackknife_error(values):
     )
 
 
-def block_jackknife(data, lattice_size, beta, block_size):
-    if block_size <= 0:
-        raise ValueError("block-size deve essere un intero positivo")
-
+def calculate_block_sums(data, block_size):
     number_of_blocks = len(data) // block_size
+    blocks = data[:number_of_blocks * block_size].reshape(number_of_blocks, block_size, 6)
+    # Colonne: E/V, m, |m|, m^2, m^4, G(0), G(p_min).
+    return np.column_stack((
+        np.sum(blocks[:, :, ENERGY], axis=1),
+        np.sum(blocks[:, :, MAGNETIZATION], axis=1),
+        np.sum(blocks[:, :, ABS_MAGNETIZATION], axis=1),
+        np.sum(blocks[:, :, MAGNETIZATION] ** 2, axis=1),
+        np.sum(blocks[:, :, MAGNETIZATION] ** 4, axis=1),
+        np.sum(blocks[:, :, G_ZERO], axis=1),
+        np.sum(blocks[:, :, G_MIN], axis=1),
+    ))
+
+
+def jackknife_from_block_sums(block_sums, lattice_size, block_size,
+                             total_measurements, observables=None):
+    number_of_blocks = len(block_sums)
     if number_of_blocks < 2:
         raise ValueError("servono almeno 2 blocchi completi per il jackknife")
-
     used_measurements = number_of_blocks * block_size
-    excluded_measurements = len(data) - used_measurements
-    used_data = data[:used_measurements]
-    observables = calculate_observables(used_data, lattice_size, beta)
-
-    blocks = used_data.reshape(number_of_blocks, block_size, 6)
-    block_energy_sums = np.sum(blocks[:, :, ENERGY], axis=1)
-    block_abs_magnetization_sums = np.sum(
-        blocks[:, :, ABS_MAGNETIZATION], axis=1
-    )
-    block_m2_sums = np.sum(blocks[:, :, MAGNETIZATION] ** 2, axis=1)
-    block_m4_sums = np.sum(blocks[:, :, MAGNETIZATION] ** 4, axis=1)
-    block_g_zero_sums = np.sum(blocks[:, :, G_ZERO], axis=1)
-    block_g_min_sums = np.sum(blocks[:, :, G_MIN], axis=1)
+    excluded_measurements = total_measurements - used_measurements
+    (block_energy_sums, block_magnetization_sums, block_abs_magnetization_sums,
+     block_m2_sums, block_m4_sums, block_g_zero_sums, block_g_min_sums) = block_sums.T
 
     total_energy_sum = np.sum(block_energy_sums)
     total_abs_magnetization_sum = np.sum(block_abs_magnetization_sums)
@@ -166,6 +199,25 @@ def block_jackknife(data, lattice_size, beta, block_size):
     total_m4_sum = np.sum(block_m4_sums)
     total_g_zero_sum = np.sum(block_g_zero_sums)
     total_g_min_sum = np.sum(block_g_min_sums)
+    if observables is None:
+        mean_m2 = total_m2_sum / used_measurements
+        if mean_m2 == 0.0:
+            raise ValueError("Binder non definito: <m^2> e' zero")
+        mean_g_zero = total_g_zero_sum / used_measurements
+        mean_g_min = total_g_min_sum / used_measurements
+        xi = calculate_xi([mean_g_zero], [mean_g_min], lattice_size)
+        observables = {
+            "energy": -total_energy_sum / used_measurements / 3.0,
+            "magnetization": np.sum(block_magnetization_sums) / used_measurements,
+            "abs_magnetization": total_abs_magnetization_sum / used_measurements,
+            "binder": (total_m4_sum / used_measurements) / mean_m2**2,
+            "susceptibility": lattice_size**3 * mean_m2,
+            "g_zero": mean_g_zero,
+            "g_min": mean_g_min,
+            "xi": xi,
+            "r_xi": xi / lattice_size,
+        }
+
     remaining_measurements = used_measurements - block_size
 
     # Ogni elemento contiene la media con un blocco escluso.
@@ -211,6 +263,46 @@ def block_jackknife(data, lattice_size, beta, block_size):
     }
 
     return observables, errors, number_of_blocks, used_measurements, excluded_measurements
+
+
+def block_jackknife(data, lattice_size, beta, block_size):
+    if block_size <= 0:
+        raise ValueError("block-size deve essere un intero positivo")
+    used = (len(data) // block_size) * block_size
+    if used < 2 * block_size:
+        raise ValueError("servono almeno 2 blocchi completi per il jackknife")
+    observables = calculate_observables(data[:used], lattice_size, beta)
+    return jackknife_from_block_sums(
+        calculate_block_sums(data, block_size), lattice_size, block_size,
+        len(data), observables,
+    )
+
+
+def analyze_streaming(filename, block_size, chunk_rows=100_000):
+    if block_size <= 0:
+        raise ValueError("block-size deve essere un intero positivo")
+    if chunk_rows <= 0:
+        raise ValueError("chunk_rows deve essere un intero positivo")
+    lattice_size, beta = read_header(filename)
+    # Ogni lettura contiene blocchi interi: nessun blocco viene spezzato.
+    # Se un singolo blocco supera il target, leggiamo un blocco alla volta.
+    chunk_rows = max(block_size, (chunk_rows // block_size) * block_size)
+    sums = []
+    total = 0
+    for data in read_data_chunks(filename, lattice_size, chunk_rows):
+        total += len(data)
+        if len(data) >= block_size:
+            sums.append(calculate_block_sums(data, block_size))
+        del data
+    if total == 0:
+        raise ValueError("il file non contiene misure")
+    if not sums:
+        raise ValueError("servono almeno 2 blocchi completi per il jackknife")
+    block_sums = np.concatenate(sums)
+    del sums
+    results = jackknife_from_block_sums(block_sums, lattice_size, block_size, total)
+    averages = block_sums[:, [5, 6, 3, 4]] / block_size
+    return lattice_size, beta, total, results, averages
 
 
 def calculate_block_averages(data, block_size):
@@ -324,14 +416,10 @@ def main():
     arguments = parser.parse_args()
 
     try:
-        lattice_size, beta, data = read_data_file(arguments.filename)
-        results = block_jackknife(
-            data, lattice_size, beta, arguments.block_size
+        lattice_size, beta, total, results, block_averages = analyze_streaming(
+            arguments.filename, arguments.block_size
         )
         observables, errors, blocks, used, excluded = results
-        block_averages = calculate_block_averages(
-            data, arguments.block_size
-        )
         blocks_output = (
             arguments.blocks_output
             if arguments.blocks_output is not None
@@ -360,7 +448,7 @@ def main():
         arguments.filename,
         lattice_size,
         beta,
-        len(data),
+        total,
         arguments.block_size,
         blocks,
         used,

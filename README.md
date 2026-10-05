@@ -185,6 +185,44 @@ Nonlinear observables are recomputed inside each jackknife sample.
 
 The script also writes a `*_blocks.txt` file containing block-level averages of the quantities required to reconstruct \(R_\xi\) and the Binder cumulant. These block data are then used by the bootstrap scaling analysis.
 
+`analyze.py` reads the time series in chunks targeting **100,000 measurements**.
+The chunk size is rounded down to a whole number of jackknife blocks; if one
+statistical block is larger than the target, one block is read at a time.
+With `--block-size 2000`, each chunk contains 50 blocks. Only seven primary
+sums per complete block are retained in RAM; raw chunks are discarded after
+processing. Reading boundaries do not change statistical blocks, and only the
+final incomplete block is excluded, as in the full-array calculation.
+
+The observable and jackknife formulas and all text output formats are retained.
+Central values are reconstructed from the block sums; grouping floating-point
+additions differently can change their last digits. Tests compare the chunked
+calculation with both the full-array and brute-force leave-one-block-out
+calculations. Compact four-column and legacy seven-column files, gzip,
+restart comments, blank lines, and final incomplete blocks are supported.
+No analysis cache is created.
+
+A synthetic test with **10 million measurements and block size 2000** measured
+**43 MiB peak RAM** for chunked analysis, compared with **1090 MiB** for the
+full-array calculation, about a **25-fold reduction**. The block averages
+matched exactly. Actual RAM use depends on the number of statistical blocks,
+block size, input format and Python/NumPy environment. RAM scales with one
+reading chunk plus the retained block sums and jackknife arrays.
+
+Batch analysis uses **eight concurrent processes by default**, with one numerical
+library thread per process. This setting is independent of simulation
+`MAX_JOBS`. Each process has private log and summary files; the launcher merges
+results in input order and stops on failed analyses.
+
+```bash
+./analyze_grid.sh "$RUN_DIR" 8:32 16:32 24:64 32:64
+# Override the number of concurrent analyses:
+ANALYSIS_JOBS=20 ./analyze_grid.sh "$RUN_DIR" 8:32 16:32 24:64 32:64
+```
+
+`ANALYSIS_JOBS` also propagates through `run_and_analyze.sh`. The default remains
+eight for the professor's machine showing 125 GiB RAM. Choose a higher count
+according to available cores and disk throughput, as well as available RAM.
+
 ## Blocking diagnostics
 
 Monte Carlo measurements are correlated. To study whether the uncertainty estimate has reached a stable blocking regime:
@@ -194,6 +232,9 @@ python3 blocking_plot.py data/example_data.dat
 ```
 
 The resulting plot shows how estimated errors change as the number of measurements per block is increased.
+This diagnostic still reads the full time series; chunked reading applies to
+`analyze.py`. The full-array functions remain available for this diagnostic and
+for validation.
 
 ## Finite-size scaling
 
