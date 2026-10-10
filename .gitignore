@@ -19,3 +19,10 @@ data/*
 *.pfx
 credentials*
 secrets*
+
+# Simulation campaigns and Slurm output
+runs/
+metropolis_runs_*/
+wolff_runs_*/
+slurm-*.out
+slurm-*.err

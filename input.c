@@ -9,7 +9,8 @@ int input_read(const char *filename, SimulationParameters *parameters)
     char start[16];
     char algorithm[16];
     int fields_read = 0;
-    char extra;
+    char key[32];
+    int seen_sigma = 0, seen_save_every = 0;
 
     file = fopen(filename, "r");
     if (file == NULL) {
@@ -62,16 +63,20 @@ int input_read(const char *filename, SimulationParameters *parameters)
         return 0;
     }
 
-    /* Campo finale opzionale: gli input precedenti restano validi. */
+    /* Campi finali opzionali: gli input precedenti restano validi. */
     parameters->sigma = 0.0;
-    if (fscanf(file, " %c", &extra) == 1) {
-        ungetc(extra, file);
-        if (fscanf(file, "sigma = %lf", &parameters->sigma) != 1 ||
-            fscanf(file, " %c", &extra) == 1) {
-            fprintf(stderr, "Errore: atteso sigma = valore alla fine dell'input.\n");
-            fclose(file);
-            return 0;
+    parameters->save_every = 100000;
+    while (fscanf(file, " %31s", key) == 1) {
+        if (strcmp(key, "sigma") == 0 && !seen_sigma) {
+            seen_sigma = 1;
+            if (fscanf(file, " = %lf", &parameters->sigma) == 1) continue;
+        } else if (strcmp(key, "save_every") == 0 && !seen_save_every) {
+            seen_save_every = 1;
+            if (fscanf(file, " = %d", &parameters->save_every) == 1) continue;
         }
+        fprintf(stderr, "Errore: campo opzionale non valido: %s.\n", key);
+        fclose(file);
+        return 0;
     }
     if (!isfinite(parameters->sigma) || parameters->sigma < 0.0 ||
         (parameters->algorithm == ALGORITHM_WOLFF && parameters->sigma != 0.0)) {
@@ -85,7 +90,7 @@ int input_read(const char *filename, SimulationParameters *parameters)
         fclose(file);
         return 0;
     }
-    if (!(parameters->beta >= 0.0)) {
+    if (!isfinite(parameters->beta) || parameters->beta < 0.0) {
         fprintf(stderr, "Errore: beta deve essere non negativa.\n");
         fclose(file);
         return 0;
@@ -102,6 +107,16 @@ int input_read(const char *filename, SimulationParameters *parameters)
     }
     if (parameters->measure_every <= 0) {
         fprintf(stderr, "Errore: measure_every deve essere maggiore di zero.\n");
+        fclose(file);
+        return 0;
+    }
+    if (parameters->save_every <= 0) {
+        fprintf(stderr, "Errore: save_every deve essere maggiore di zero.\n");
+        fclose(file);
+        return 0;
+    }
+    if (strcmp(parameters->config_file, parameters->data_file) == 0) {
+        fprintf(stderr, "Errore: configurazione e dati devono avere nomi diversi.\n");
         fclose(file);
         return 0;
     }
