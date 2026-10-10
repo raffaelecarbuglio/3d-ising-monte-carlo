@@ -1,97 +1,112 @@
+#define _POSIX_C_SOURCE 200809L
+#include <errno.h>
+#include <limits.h>
 #include <math.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "input.h"
-#include "ising.h"
-#include "rng.h"
+#include <unistd.h>
+#include "checkpoint.h"
 
-static FILE *open_data_file(const SimulationParameters *p, int initial_sweep)
+static volatile sig_atomic_t stop_requested;
+
+static void request_stop(int signal_number)
 {
-    FILE *file;
+    (void)signal_number;
+    stop_requested = 1;
+}
+
+static FILE *open_data_file(const SimulationParameters *p,
+                            const Checkpoint *state, int complete)
+{
     const char *columns = "# columns: sweep energy magnetization g_min\n";
+    FILE *file;
 
     if (p->start == START_RESTART) {
-        /* Un restart aggiunge un segmento breve al file esistente o ne crea uno. */
-        char line[512];
-        int has_contents = 0;
-        int same_columns = 0;
-        double old_sigma = 0.0; /* I file precedenti erano senza rumore. */
+        char line[512], old_algorithm[16] = "";
+        int same_columns = 0, old_L = -1, old_measure_every = -1;
+        double old_beta = -1.0, old_sigma = 0.0;
+        long size, offset;
 
-        file = fopen(p->data_file, "a+");
-        if (file == NULL) {
-            fprintf(stderr, "Errore: impossibile aggiungere dati a '%s'.\n", p->data_file);
-            return NULL;
-        }
+        file = fopen(p->data_file, "r+");
+        if (file == NULL && errno == ENOENT) file = fopen(p->data_file, "wx");
+        if (file == NULL) goto error;
+        if (fseek(file, 0, SEEK_END) != 0 || (size = ftell(file)) < 0) goto invalid;
         rewind(file);
-        while (fgets(line, sizeof(line), file) != NULL) {
-            has_contents = 1;
-            sscanf(line, "# sigma = %lf", &old_sigma);
-            if (strcmp(line, columns) == 0) {
-                same_columns = 1;
-                break;
+        if (size > 0) {
+            while (fgets(line, sizeof(line), file) != NULL) {
+                sscanf(line, "# L = %d", &old_L);
+                sscanf(line, "# beta = %lf", &old_beta);
+                sscanf(line, "# sigma = %lf", &old_sigma);
+                sscanf(line, "# algorithm = %15s", old_algorithm);
+                sscanf(line, "# measure_every = %d", &old_measure_every);
+                if (strcmp(line, columns) == 0) {
+                    same_columns = 1;
+                    break;
+                }
+                if (line[0] != '#') break;
             }
-            if (line[0] != '#') {
-                break;
+            if (ferror(file) || !same_columns || old_L != p->L ||
+                old_beta != p->beta || old_sigma != p->sigma ||
+                old_measure_every != p->measure_every ||
+                strcmp(old_algorithm, algorithm_name(p->algorithm)) != 0) goto invalid;
+
+            if (complete) {
+                offset = state->data_offset;
+                if (strcmp(state->data_file, p->data_file) != 0 ||
+                    offset < ftell(file) || offset > size) goto invalid;
+            } else {
+                /* Vecchio salvataggio: elimina le misure successive agli spin salvati. */
+                offset = ftell(file);
+                while (fgets(line, sizeof(line), file) != NULL) {
+                    int sweep;
+                    if (line[0] != '#') {
+                        if (sscanf(line, "%d", &sweep) != 1 ||
+                            sweep > state->production_sweeps) break;
+                    }
+                    offset = ftell(file);
+                }
+                if (ferror(file)) goto invalid;
             }
-        }
-        if (ferror(file) || (has_contents && (!same_columns || old_sigma != p->sigma))) {
-            fprintf(stderr,
-                    "Errore: formato dati o sigma incompatibile in '%s'; "
-                    "usare un nuovo data_file per il restart.\n", p->data_file);
-            fclose(file);
-            return NULL;
-        }
-        if (fseek(file, 0, SEEK_END) != 0) {
-            fclose(file);
-            return NULL;
-        }
-        if (has_contents) {
+            /* Il checkpoint viene scritto dopo il flush: tutto il seguito e' da rifare. */
+            if (ftruncate(fileno(file), offset) != 0 ||
+                fseek(file, offset, SEEK_SET) != 0) goto invalid;
             if (fprintf(file,
-                        "#\n"
-                        "# restart: initial_sweep=%d beta=%.17g "
-                        "seed=%d n_therm=%d "
-                        "n_sweeps=%d measure_every=%d algorithm=%s sigma=%.17g\n"
-                        "# config_file=%s\n",
-                        initial_sweep, p->beta, p->seed, p->n_therm,
-                        p->n_sweeps, p->measure_every,
-                        algorithm_name(p->algorithm), p->sigma, p->config_file) < 0) {
-                fclose(file);
-                return NULL;
-            }
+                        "# restart: initial_sweep=%d seed=%d rng_restored=%d\n",
+                        state->production_sweeps, p->seed, complete) < 0) goto invalid;
             return file;
         }
     } else {
         file = fopen(p->data_file, "wx");
-    }
-    if (file == NULL) {
-        fprintf(stderr,
-                "Errore: impossibile creare il file dati '%s'; "
-                "un file esistente non viene sovrascritto.\n",
-                p->data_file);
-        return NULL;
+        if (file == NULL) goto error;
     }
     if (fprintf(file,
-                "# Ising 3D\n"
-                "# L = %d\n"
-                "# beta = %.17g\n"
-                "# seed = %d\n"
-                "# start = %s\n"
-                "# algorithm = %s\n"
-                "# sigma = %.17g\n"
-                "# n_therm = %d\n"
-                "# n_sweeps = %d\n"
-                "# measure_every = %d\n"
-                "# config_file = %s\n"
-                "%s",
+                "# Ising 3D\n# L = %d\n# beta = %.17g\n# seed = %d\n"
+                "# start = %s\n# algorithm = %s\n# sigma = %.17g\n"
+                "# n_therm = %d\n# n_sweeps = %d\n# measure_every = %d\n"
+                "# save_every = %d\n# config_file = %s\n%s",
                 p->L, p->beta, p->seed, start_mode_name(p->start),
-                algorithm_name(p->algorithm), p->sigma,
-                p->n_therm, p->n_sweeps, p->measure_every,
-                p->config_file, columns) < 0) {
-        fclose(file);
-        return NULL;
-    }
+                algorithm_name(p->algorithm), p->sigma, p->n_therm,
+                p->n_sweeps, p->measure_every, p->save_every,
+                p->config_file, columns) < 0) goto invalid;
     return file;
+invalid:
+    fclose(file);
+error:
+    fprintf(stderr, "Errore: dati non accessibili o incompatibili in '%s'.\n", p->data_file);
+    return NULL;
+}
+
+static int save_checkpoint(FILE *data, const SimulationParameters *p,
+                           const IsingLattice *lattice, Checkpoint *state)
+{
+    if (fflush(data) != 0 || (state->data_offset = ftell(data)) < 0 ||
+        !checkpoint_save(p, lattice, state)) {
+        fprintf(stderr, "Errore durante il salvataggio del checkpoint.\n");
+        return 0;
+    }
+    return 1;
 }
 
 static int write_measurement(FILE *file, const IsingLattice *lattice,
@@ -165,54 +180,45 @@ static int write_measurement(FILE *file, const IsingLattice *lattice,
 
 static int run_simulation(const SimulationParameters *p)
 {
-    const int save_every = 100000;
     IsingLattice lattice;
-    Pcg32 rng;
+    Checkpoint state = {0};
     FILE *data;
-    int *cluster = NULL;
-    int *in_cluster = NULL;
+    int *cluster = NULL, *in_cluster = NULL;
     double wolff_probability = 0.0;
-    double cos_table[ISING_MAX_L];
-    double sin_table[ISING_MAX_L];
+    double cos_table[ISING_MAX_L], sin_table[ISING_MAX_L];
     double minimum_momentum;
-    int previous_sweeps = 0;
-    int sweep;
-    int coordinate;
-    int ok = 1;
+    int complete = 0, initial_sweep, target_sweep, updates = 0, ok = 1;
 
-    /* 1. Creazione del reticolo. */
-    if (!ising_create(&lattice, p->L)) {
-        return 0;
-    }
-
-    /* 2. Inizializzazione del generatore casuale. */
-    pcg32_seed(&rng, p->seed);
-
-    minimum_momentum = 2.0 * acos(-1.0) / lattice.L;
-    for (coordinate = 0; coordinate < lattice.L; coordinate++) {
-        double angle = minimum_momentum * coordinate;
-
-        cos_table[coordinate] = cos(angle);
-        sin_table[coordinate] = sin(angle);
-    }
-
-    /* 3. Preparazione iniziale oppure caricamento di un restart. */
+    if (!ising_create(&lattice, p->L)) return 0;
+    pcg32_seed(&state.rng, p->seed);
+    state.thermal_remaining = p->n_therm;
     if (p->start == START_ORDERED) {
         ising_fill_ordered(&lattice);
     } else if (p->start == START_RANDOM) {
-        ising_fill_random(&lattice, &rng);
-    } else {
-        if (!ising_load_configuration(p->config_file, &lattice, &previous_sweeps)) {
-            ising_destroy(&lattice);
-            return 0;
-        }
+        ising_fill_random(&lattice, &state.rng);
+    } else if (!checkpoint_load(p, &lattice, &state, &complete)) {
+        ising_destroy(&lattice);
+        return 0;
     }
+    initial_sweep = state.production_sweeps;
+    if (p->n_sweeps > INT_MAX - initial_sweep) {
+        fprintf(stderr, "Errore: troppi sweep per il contatore.\n");
+        ising_destroy(&lattice);
+        return 0;
+    }
+    target_sweep = initial_sweep + p->n_sweeps;
 
+    minimum_momentum = 2.0 * acos(-1.0) / lattice.L;
+    for (int i = 0; i < lattice.L; i++) {
+        double angle = minimum_momentum * i;
+        cos_table[i] = cos(angle);
+        sin_table[i] = sin(angle);
+    }
     if (p->algorithm == ALGORITHM_WOLFF) {
         cluster = malloc(lattice.n_spins * sizeof(*cluster));
         in_cluster = calloc(lattice.n_spins, sizeof(*in_cluster));
         if (cluster == NULL || in_cluster == NULL) {
-            fprintf(stderr, "Errore: memoria insufficiente per il cluster Wolff.\n");
+            fprintf(stderr, "Errore: memoria insufficiente per Wolff.\n");
             free(cluster);
             free(in_cluster);
             ising_destroy(&lattice);
@@ -220,84 +226,50 @@ static int run_simulation(const SimulationParameters *p)
         }
         wolff_probability = 1.0 - exp(-2.0 * p->beta);
     }
-
-    /* 4. Apertura del file delle misure. */
-    data = open_data_file(p, previous_sweeps);
+    data = open_data_file(p, &state, complete);
     if (data == NULL) {
         free(cluster);
         free(in_cluster);
         ising_destroy(&lattice);
         return 0;
     }
+    printf("L=%d beta=%.17g algorithm=%s sigma=%.17g seed=%d rng_restored=%d\n",
+           p->L, p->beta, algorithm_name(p->algorithm), p->sigma, p->seed, complete);
+    fflush(stdout);
 
-    printf("Reticolo %d x %d x %d, start=%s, algorithm=%s, seed=%d, sigma=%.17g\n",
-           p->L, p->L, p->L, start_mode_name(p->start),
-           algorithm_name(p->algorithm), p->seed, p->sigma);
-
-    /* 5. Termalizzazione: questi sweep non producono misure. */
-    for (sweep = 0; sweep < p->n_therm; sweep++) {
+    /* Salva anche prima della termalizzazione: ogni job puo' essere ripreso. */
+    ok = save_checkpoint(data, p, &lattice, &state);
+    while (ok && !stop_requested &&
+           (state.thermal_remaining > 0 || state.production_sweeps < target_sweep)) {
         if (p->algorithm == ALGORITHM_METROPOLIS) {
-            ising_metropolis_sweep(&lattice, p->beta, p->sigma, &rng);
+            ising_metropolis_sweep(&lattice, p->beta, p->sigma, &state.rng);
         } else {
-            ising_wolff_update(&lattice, wolff_probability, &rng,
-                               cluster, in_cluster);
+            ising_wolff_update(&lattice, wolff_probability, &state.rng, cluster, in_cluster);
         }
-    }
-
-    /* 6. Produzione e scrittura periodica delle misure. */
-    for (sweep = 1; sweep <= p->n_sweeps; sweep++) {
-        if (p->algorithm == ALGORITHM_METROPOLIS) {
-            ising_metropolis_sweep(&lattice, p->beta, p->sigma, &rng);
+        if (state.thermal_remaining > 0) {
+            state.thermal_remaining--;
         } else {
-            ising_wolff_update(&lattice, wolff_probability,
-                               &rng, cluster, in_cluster);
-        }
-
-        if (sweep % p->measure_every == 0) {
-            if (!write_measurement(data, &lattice, previous_sweeps + sweep,
-                                   cos_table, sin_table)) {
-                fprintf(stderr, "Errore durante la scrittura delle misure.\n");
-                ok = 0;
-                break;
+            state.production_sweeps++;
+            /* La cadenza delle misure non riparte da zero a ogni segmento. */
+            if (state.production_sweeps % p->measure_every == 0) {
+                ok = write_measurement(data, &lattice, state.production_sweeps,
+                                       cos_table, sin_table);
             }
         }
-
-        /* Salva gli spin e il contatore ogni save_every sweep di produzione. */
-        if (sweep % save_every == 0) {
-            if (fflush(data) != 0) {
-                fprintf(stderr, "Errore durante la scrittura delle misure.\n");
-                ok = 0;
-                break;
-            }
-            if (!ising_save_configuration(p->config_file, &lattice,
-                                          previous_sweeps + sweep)) {
-                ok = 0;
-                break;
-            }
+        updates++;
+        if (ok && updates == p->save_every) {
+            ok = save_checkpoint(data, p, &lattice, &state);
+            updates = 0;
         }
     }
-
-    /* 7. Chiusura del file dati. */
-    if (fclose(data) != 0) {
-        fprintf(stderr, "Errore durante la chiusura del file dati.\n");
-        ok = 0;
-    }
-
-    /* 8. Salvataggio della configurazione finale. */
+    if (ok) ok = save_checkpoint(data, p, &lattice, &state);
+    if (fclose(data) != 0) ok = 0;
     if (ok) {
-        if (!ising_save_configuration(p->config_file, &lattice,
-                                      previous_sweeps + p->n_sweeps)) {
-            ok = 0;
-        }
+        printf("%s: %d sweep prodotti; totale=%d; termalizzazione restante=%d.\n",
+               stop_requested ? "Interrotto e salvato" : "Completato",
+               state.production_sweeps - initial_sweep,
+               state.production_sweeps, state.thermal_remaining);
     }
-
-    if (ok) {
-        printf("Completati %d sweep; totale salvato: %d.\n",
-               p->n_sweeps, previous_sweeps + p->n_sweeps);
-        printf("Configurazione finale: %s\n", p->config_file);
-    }
-
-    /* 9. Liberazione della memoria del reticolo. */
     free(cluster);
     free(in_cluster);
     ising_destroy(&lattice);
@@ -307,16 +279,17 @@ static int run_simulation(const SimulationParameters *p)
 int main(int argc, char **argv)
 {
     SimulationParameters parameters;
+    struct sigaction action = {0};
 
     if (argc != 2) {
         fprintf(stderr, "Uso: %s input.dat\n", argv[0]);
         return EXIT_FAILURE;
     }
-    if (!input_read(argv[1], &parameters)) {
-        return EXIT_FAILURE;
-    }
-    if (!run_simulation(&parameters)) {
-        return EXIT_FAILURE;
-    }
+    action.sa_handler = request_stop;
+    sigemptyset(&action.sa_mask);
+    if (sigaction(SIGTERM, &action, NULL) != 0 ||
+        sigaction(SIGINT, &action, NULL) != 0 ||
+        sigaction(SIGUSR1, &action, NULL) != 0) return EXIT_FAILURE;
+    if (!input_read(argv[1], &parameters) || !run_simulation(&parameters)) return EXIT_FAILURE;
     return EXIT_SUCCESS;
 }
