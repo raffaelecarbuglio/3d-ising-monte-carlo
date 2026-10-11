@@ -33,8 +33,6 @@ Edit [inputs/input_example.dat](inputs/input_example.dat) to set lattice size, t
 
 Use `python3 <script> --help` for analysis options. Parameter scans are provided by [run_metropolis.sh](run_metropolis.sh) and [run_wolff.sh](run_wolff.sh).
 
-## INFN cluster
-
-[cluster/README.md](cluster/README.md) explains preparation, Slurm submission, and continuation of independent simulations. Checkpoints preserve the spin configuration, random generator, thermalization progress, and measurement-file position. `save_every` sets their interval (default: 100000 updates). Existing input files remain valid.
+For INFN submission scripts, see [cluster/README.md](cluster/README.md).
 
 *Active thesis project; results and analysis are evolving.*
