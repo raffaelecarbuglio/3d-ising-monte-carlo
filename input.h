@@ -21,7 +21,6 @@ typedef struct {
     int n_therm;
     int n_sweeps;
     int measure_every;
-    int save_every;
     int seed;
     StartMode start;
     Algorithm algorithm;
