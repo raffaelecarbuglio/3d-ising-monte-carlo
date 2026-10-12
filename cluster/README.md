@@ -19,6 +19,8 @@ REPLICAS=2 N_THERM=100 N_SWEEPS=1000 \
 
 Each beta gets `REPLICAS` simulations with distinct seeds, up to 32 per job. Defaults: `REPLICAS=2`, `BASE_SEED=200000`, `N_THERM=50000`, `N_SWEEPS=1000000`, `MEASURE_EVERY=10`, `ALGORITHM=metropolis`, `SIGMA=0`. Use a different seed range for each campaign. Wolff requires `SIGMA=0`. The generated inputs are in `inputs/`, outputs in `results/`, and logs in `logs/` inside the run directory.
 
+Check seeds across all batches under `runs/` with `python3 cluster/check_seeds.py runs`. You can also pass several batch directories. The checker reads `.in` files, reports repeated seeds and their file paths, and exits with an error if duplicates are found. It only checks the inputs currently present; keep copies of old inputs if you want to include past runs.
+
 The job requests the professor's `default` account, `zefiro` partition, one core per simulation, 1 GiB per core and 23:59 hours. Edit `cluster/job.batch` before preparation if needed. Use `squeue -u "$USER"` to monitor jobs.
 
 To continue a **completed** job, edit its inputs: set `start = restart`, `n_therm = 0`, and a new distinct seed for each simulation. Then submit the same directory again after the previous job has ended. Each invocation adds `n_sweeps` production updates.
