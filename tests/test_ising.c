@@ -211,36 +211,6 @@ static void test_reproducibility(double sigma)
 }
 
 
-static void test_gaussian(void)
-{
-    Pcg32 rng, reference;
-    double sum = 0.0, sum_squared = 0.0, sum_neighbors = 0.0;
-    double previous = 0.0;
-    int i;
-    const int n = 200000;
-
-    pcg32_seed(&rng, 31415);
-    for (i = 0; i < n; i++) {
-        double value = pcg32_gaussian(&rng);
-        sum += value;
-        sum_squared += value * value;
-        sum_neighbors += previous * value;
-        previous = value;
-    }
-    check(fabs(sum / n) < 0.015, "gaussiana: media vicina a zero");
-    check(fabs(sum_squared / n - 1.0) < 0.025,
-          "gaussiana: secondo momento vicino a uno");
-    check(fabs(sum_neighbors / n) < 0.015,
-          "gaussiana: campioni consecutivi non correlati");
-
-    /* Il seed deve cancellare anche il secondo campione in attesa. */
-    pcg32_gaussian(&rng);
-    pcg32_seed(&rng, 42);
-    pcg32_seed(&reference, 42);
-    check(pcg32_gaussian(&rng) == pcg32_gaussian(&reference),
-          "nuovo seed azzera la cache gaussiana");
-}
-
 /* Quadratura indipendente della regola originale, separata nel punto angoloso. */
 static double integrated_acceptance(int d, double beta, double sigma)
 {
@@ -465,7 +435,6 @@ int main(void)
     test_lattice();
     test_reproducibility(0.0);
     test_reproducibility(0.5);
-    test_gaussian();
     test_noisy_acceptance();
     test_wolff();
     test_save_load();

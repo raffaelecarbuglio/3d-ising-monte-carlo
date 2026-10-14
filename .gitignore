@@ -1,7 +1,7 @@
 *.o
 *.tmp
 ising
-tests
+/tests/test_ising
 example_config.dat
 example_data.dat
 .venv/
