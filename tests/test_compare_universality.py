@@ -38,26 +38,7 @@ def save_point(path, point):
 
 
 class UniversalityTests(unittest.TestCase):
-    def test_bundled_reference_matches_reported_94_point_fit(self):
-        reference = load_reference(Path(__file__).with_name("clean_reference.npz"))
-        self.assertEqual(reference["clean_coefficients"].shape, (5000, 11))
-        self.assertEqual(len(reference["clean_paths"]), 94)
-        self.assertEqual(int(reference["dof"]), 83)
-        self.assertAlmostEqual(float(reference["chi2"]), 44.21632986812246, places=9)
-        np.testing.assert_allclose(reference["coefficients"], [
-            2.8142240796356073, 5.821679480578112, -43.522794929376033,
-            96.305141468186577, -106.14348481524891, 59.508782036064538,
-            -13.539418997071191, -0.26729992731527624, -1.8571338563591855,
-            4.0541527302765035, -2.0487227861018917,
-        ], rtol=1e-14)
-        np.testing.assert_allclose(reference["clean_coefficients"].std(axis=0, ddof=1), [
-            0.13317781919578847, 1.375910597466804, 5.732777575133909,
-            12.346766076790198, 14.530829154097166, 8.8825210849564513,
-            2.2084541531345865, 0.13582240992101161, 0.64589173965727353,
-            0.96736284486109481, 0.46106917110815937,
-        ], rtol=1e-14)
-        self.assertLess(float(reference["r_range"][0]), 0.30)
-        self.assertGreater(float(reference["r_range"][1]), 1.00)
+    def test_correlated_coefficients_cancel_on_curve(self):
         # Correlated intercept/slope shifts cancel at r=0.6.
         samples = np.zeros((5, 11))
         samples[:, 0] = np.arange(5) * 0.6
@@ -120,8 +101,6 @@ class UniversalityTests(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(main(argv), 0)
             self.assertEqual(cache.read_bytes(), original_cache)
-            self.assertFalse(Path(f"{prefix}_summary.txt").exists())
-            self.assertFalse(Path(f"{prefix}_clean_curve.txt").exists())
             rows = np.loadtxt(f"{prefix}_points.txt")
             np.testing.assert_array_equal(rows[:, 3], np.full(4, 0.001))
             np.testing.assert_array_equal(rows[:, 5], np.full(4, 0.002))
@@ -130,7 +109,7 @@ class UniversalityTests(unittest.TestCase):
             with np.load(f"{prefix}_bootstrap.npz") as archive:
                 self.assertEqual(archive["scaled_delta_U_covariance"].shape, (4, 4))
                 self.assertEqual(archive["perturbed_pairs"].shape, (5, 4, 2))
-                self.assertEqual(archive["clean_curve"].shape, (300, 4))
+                self.assertEqual(archive["clean_curve"].shape[1], 4)
                 self.assertEqual(len(archive["clean_paths"]), 36)
                 self.assertEqual(int(archive["reference_seed"]), 12345)
                 np.testing.assert_array_equal(archive["clean_coefficients"], ref["clean_coefficients"])

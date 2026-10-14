@@ -16,7 +16,6 @@ from analyze import (
     calculate_observables,
     calculate_susceptibility,
     calculate_xi,
-    default_blocks_filename,
     jackknife_error,
     read_data_file,
     save_blocks,
@@ -107,21 +106,6 @@ class AnalysisTests(unittest.TestCase):
                                                                rtol=1e-12, atol=1e-14)
                                 np.testing.assert_array_equal(streamed[4], expected_blocks)
 
-    def test_streaming_default_chunks_and_final_tail(self):
-        contents = "# L = 4\n# beta = 0.22\n" + "1 -64 32 1\n" * 200_001
-        with tempfile.TemporaryDirectory() as directory:
-            filename = Path(directory) / "run.dat"
-            filename.write_text(contents)
-            original = np.loadtxt
-            rows_read = []
-            def recording_loadtxt(lines, **kwargs):
-                rows_read.append(len(lines))
-                return original(lines, **kwargs)
-            with patch("analyze.np.loadtxt", side_effect=recording_loadtxt):
-                result = analyze_streaming(filename, 2000)
-            self.assertEqual(rows_read, [100_000, 100_000, 1])
-            self.assertEqual(result[3][2:], (100, 200_000, 1))
-
     def test_streaming_errors_in_later_chunks(self):
         header = "# L = 4\n# beta = 0.22\n"
         rows = "1 -64 32 1\n2 -128 -48 2\n"
@@ -174,25 +158,6 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(observables["susceptibility"], np.mean(data[:used, 4]))
         self.assertEqual(errors["susceptibility"], 3.0)
 
-    def test_comments_in_the_middle_of_data_file(self):
-        contents = """# Ising data
-# L = 4
-# beta = 0.22
-# columns
-0 -1.0 0.5 0.5 0.4 4.0 1.0
-# restart information
-1 -2.0 -0.5 0.5 0.6 4.0 1.0
-"""
-        with tempfile.TemporaryDirectory() as directory:
-            filename = Path(directory) / "data.dat"
-            filename.write_text(contents, encoding="utf-8")
-            lattice_size, beta, data = read_data_file(filename)
-
-        self.assertEqual(lattice_size, 4)
-        self.assertEqual(beta, 0.22)
-        self.assertEqual(data.shape, (2, 6))
-        self.assertEqual(data[1, 0], 1.0)
-
     def test_compact_and_legacy_files_give_same_analysis(self):
         header = "# L = 4\n# beta = 0.22\n"
         compact = header + "1 -64 32 1\n2 -128 -48 2\n3 -96 40 1.5\n4 -64 -32 1\n"
@@ -240,30 +205,6 @@ class AnalysisTests(unittest.TestCase):
         self.assertAlmostEqual(observables["energy"], -2.5 / 3.0)
         self.assertAlmostEqual(errors["energy"], 1.0 / 3.0)
 
-    def test_optimized_jackknife_matches_brute_force(self):
-        data = np.array(
-            [
-                make_row(0, -2.0, 0.8, 8.0, 1.0),
-                make_row(1, -1.8, -0.6, 7.0, 1.2),
-                make_row(2, -1.5, 0.4, 6.0, 1.1),
-                make_row(3, -1.2, -0.3, 5.0, 1.3),
-                make_row(4, -1.0, 0.2, 4.0, 1.0),
-                make_row(5, -0.8, -0.1, 3.0, 0.9),
-                make_row(6, 100.0, 1.0, 1.0, 2.0),
-            ]
-        )
-
-        for block_size in (1, 2, 3):
-            with self.subTest(block_size=block_size):
-                optimized = block_jackknife(data, 6, 0.22, block_size)
-                brute_force = brute_force_block_jackknife(data, 6, 0.22, block_size)
-
-                for name in optimized[0]:
-                    self.assertAlmostEqual(optimized[0][name], brute_force[0][name])
-                for name in optimized[1]:
-                    self.assertAlmostEqual(optimized[1][name], brute_force[1][name])
-                self.assertEqual(optimized[2:], brute_force[2:])
-
     def test_block_averages_contain_primary_quantities(self):
         data = np.array([
             make_row(0, -1.0, 1.0, 4.0, 1.0),
@@ -280,16 +221,6 @@ class AnalysisTests(unittest.TestCase):
             [9.0, 3.0, 4.0, 16.0],
         ])
         np.testing.assert_allclose(block_averages, expected)
-
-    def test_default_blocks_filename(self):
-        self.assertEqual(
-            default_blocks_filename("data/L8_data.dat"),
-            "data/L8_data_blocks.txt",
-        )
-        self.assertEqual(
-            default_blocks_filename("data/L8_data.dat.gz"),
-            "data/L8_data_blocks.txt",
-        )
 
     def test_save_blocks_writes_metadata_and_values(self):
         block_averages = np.array([

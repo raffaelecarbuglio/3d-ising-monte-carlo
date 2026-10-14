@@ -112,7 +112,7 @@ class FitBetaCTests(unittest.TestCase):
                 header = "\n".join(f"{key} = {value}" for key, value in point.items()
                                    if key != "blocks")
                 np.savetxt(directory / f"run{index}_blocks.txt", point["blocks"], header=header)
-            command = [sys.executable, str(Path(__file__).with_name("fit_beta_c.py")),
+            command = [sys.executable, str(Path(__file__).resolve().parent.parent / "fit_beta_c.py"),
                        str(directory), "--bootstrap", "3", "--beta-min", "0.221",
                        "--beta-max", "0.226", "--output-prefix", str(directory / "fit")]
             result = subprocess.run(command, capture_output=True, text=True)

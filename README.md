@@ -21,6 +21,8 @@ make test
 make test-analysis
 ```
 
+Tests are kept in [`tests/`](tests/); run them with `make test` and `make test-analysis`.
+
 The bundled input is a tiny demonstration. For scientific runs, increase thermalization and sampling, and choose a block size using [blocking_plot.py](blocking_plot.py).
 
 Edit [inputs/input_example.dat](inputs/input_example.dat) to set lattice size, temperature, run length, seed, and algorithm. Set `sigma > 0` for noisy Metropolis; Wolff requires `sigma = 0`. One Wolff “sweep” means one cluster update.
