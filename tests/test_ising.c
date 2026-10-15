@@ -169,7 +169,7 @@ static void test_lattice(void)
 
     pcg32_seed(&rng, 123);
     ising_fill_ordered(&lattice);
-    check(ising_metropolis_sweep(&lattice, 0.0, 0.0, &rng) == lattice.n_spins,
+    check(ising_metropolis_sweep(&lattice, 0.0, 0.0, 0.0, &rng) == lattice.n_spins,
           "a beta=0 ogni sito e' aggiornato una volta");
 
     for (i = 0; i < lattice.n_spins; i++) {
@@ -200,8 +200,8 @@ static void test_reproducibility(double sigma)
     pcg32_seed(&rng_b, 9876);
 
     for (sweep = 0; sweep < 8; sweep++) {
-        ising_metropolis_sweep(&a, 0.22, sigma, &rng_a);
-        ising_metropolis_sweep(&b, 0.22, sigma, &rng_b);
+        ising_metropolis_sweep(&a, 0.22, sigma, 0.0, &rng_a);
+        ising_metropolis_sweep(&b, 0.22, sigma, 0.0, &rng_b);
     }
 
     check(same_spins(&a, &b),
@@ -254,7 +254,7 @@ static void test_noisy_acceptance(void)
                 pcg32_seed(&rng, seed);
                 pcg32_seed(&expected_rng, seed);
                 int flip = beta == 0.0 || pcg32_uniform(&expected_rng) < reference;
-                ising_metropolis_sweep(&lattice, beta, sigma, &rng);
+                ising_metropolis_sweep(&lattice, beta, sigma, 0.0, &rng);
                 sweep_ok &= lattice.spins[0] == (flip ? -1 : 1);
             }
         }
@@ -269,6 +269,53 @@ static void test_noisy_acceptance(void)
     check(sweep_ok, "sweep rumoroso: tabella, indici e aggiornamento parametri corretti");
     check(limits_ok, "accettazione mediata: limiti pulito, rumore piccolo e grande");
     ising_destroy(&lattice);
+}
+
+static void test_rounding(void)
+{
+    /* Costi attesi: caso esatto, quattro famiglie, riscalamento e q4=0. */
+    const double cases[][4] = {
+        {1.0, 4, 8, 12}, {0.55, 2, 4, 7}, {0.60, 2, 5, 7},
+        {0.40, 2, 3, 5}, {0.45, 2, 4, 5}, {0.28125, 1, 2, 3},
+        {0.1, 0, 1, 1}
+    };
+    const int neighbors[6] = {2, 1, 6, 3, 18, 9};
+    IsingLattice lattice, clean;
+    int costs_ok = 1, flips_ok = 1, identical = 1;
+    ising_create(&lattice, 3);
+    ising_create(&clean, 3);
+    for (size_t k = 0; k < sizeof(cases) / sizeof(cases[0]); k++) {
+        double lambda = cases[k][0];
+        for (int j = 0; j < 7; j++) {
+            int d = 4 * (j - 3);
+            double q = d == 0 ? 0.0 : copysign(cases[k][abs(d) / 4] / lambda, d);
+            costs_ok &= fabs(ising_rounded_energy(d, lambda) - q) < 1e-14;
+            for (int seed = 0; seed < 1000; seed++) {
+                Pcg32 rng, reference_rng;
+                ising_fill_ordered(&lattice);
+                for (int n = 0; n < 6 - j; n++) lattice.spins[neighbors[n]] = -1;
+                pcg32_seed(&rng, seed);
+                pcg32_seed(&reference_rng, seed);
+                int flip = d <= 0 || pcg32_uniform(&reference_rng) < exp(-0.22 * q);
+                ising_metropolis_sweep(&lattice, 0.22, 0.0, lambda, &rng);
+                flips_ok &= lattice.spins[0] == (flip ? -1 : 1);
+            }
+        }
+    }
+    Pcg32 rng, clean_rng;
+    pcg32_seed(&rng, 42);
+    pcg32_seed(&clean_rng, 42);
+    ising_fill_random(&lattice, &rng);
+    ising_fill_random(&clean, &clean_rng);
+    for (int sweep = 0; sweep < 100; sweep++) {
+        ising_metropolis_sweep(&lattice, 0.22, 0.0, 1.0, &rng);
+        ising_metropolis_sweep(&clean, 0.22, 0.0, 0.0, &clean_rng);
+        identical &= same_spins(&lattice, &clean);
+    }
+    check(costs_ok && flips_ok, "arrotondamento: costi e flip nei quattro versi e casi limite");
+    check(identical, "lambda=1 e lambda=0: stessa traiettoria Metropolis");
+    ising_destroy(&lattice);
+    ising_destroy(&clean);
 }
 
 static void test_wolff(void)
@@ -327,7 +374,7 @@ static void test_save_load(void)
     ising_destroy(&loaded);
 }
 
-static void test_restart(void)
+static void test_restart(double lambda)
 {
     const char *first =
         "L = 3\n"
@@ -355,10 +402,19 @@ static void test_restart(void)
     int restart_status;
     int measures_before;
     int measures_after;
+    char first_input[1024], restart_input[1024], changed_input[1024];
+
+    /* Verifica anche input precedenti e i due ordini dei campi opzionali. */
+    snprintf(first_input, sizeof(first_input), "%s", first);
+    snprintf(restart_input, sizeof(restart_input), "%s", restart);
+    if (lambda > 0.0) {
+        snprintf(first_input, sizeof(first_input), "%slambda = %.17g\nsigma = 0\n", first, lambda);
+        snprintf(restart_input, sizeof(restart_input), "%ssigma = 0\nlambda = %.17g\n", restart, lambda);
+    }
 
     remove("test_data.tmp");
-    write_text("test_first_input.tmp", first);
-    write_text("test_restart_input.tmp", restart);
+    write_text("test_first_input.tmp", first_input);
+    write_text("test_restart_input.tmp", restart_input);
 
     first_status = system("./ising test_first_input.tmp > test_program_output.tmp");
     measures_before = count_numeric_lines("test_data.tmp");
@@ -371,6 +427,13 @@ static void test_restart(void)
           "restart conserva e aggiunge le misure");
     check(last_sweep("test_data.tmp") == 8,
           "restart continua la numerazione degli sweep");
+
+    snprintf(changed_input, sizeof(changed_input), "%slambda = 0.6\n", restart);
+    write_text("test_restart_input.tmp", changed_input);
+    restart_status = system("./ising test_restart_input.tmp >> test_program_output.tmp 2>&1");
+    check(restart_status != 0 && count_numeric_lines("test_data.tmp") == measures_after,
+          "restart rifiuta lambda diverso senza aggiungere misure");
+    write_text("test_restart_input.tmp", restart_input);
 
     write_text("test_data.tmp",
                "# columns: sweep energy_per_spin magnetization_per_spin "
@@ -436,9 +499,11 @@ int main(void)
     test_reproducibility(0.0);
     test_reproducibility(0.5);
     test_noisy_acceptance();
+    test_rounding();
     test_wolff();
     test_save_load();
-    test_restart();
+    test_restart(0.0);
+    test_restart(0.55);
     test_wolff_simulation();
 
     printf("\nTest eseguiti: %d, falliti: %d\n", tests_run, tests_failed);

@@ -20,7 +20,10 @@ int ising_total_energy(const IsingLattice *lattice);
 int ising_total_magnetization(const IsingLattice *lattice);
 /* beta >= 0, sigma >= 0; delta_energy in {-12,-8,-4,0,4,8,12}. */
 double ising_noisy_acceptance(int delta_energy, double beta, double sigma);
-int ising_metropolis_sweep(IsingLattice *lattice, double beta, double sigma, Pcg32 *rng);
+/* lambda = 0 disattiva l'arrotondamento. */
+double ising_rounded_energy(int delta_energy, double lambda);
+int ising_metropolis_sweep(IsingLattice *lattice, double beta, double sigma,
+                           double lambda, Pcg32 *rng);
 int ising_wolff_update(IsingLattice *lattice, double probability, Pcg32 *rng,
                        int *cluster, int *in_cluster);
 int ising_save_configuration(const char *filename, const IsingLattice *lattice,

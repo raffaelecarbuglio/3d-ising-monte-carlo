@@ -9,3 +9,4 @@ algorithm = metropolis
 config_file = data/example_config.dat
 data_file = data/example_data.dat
 sigma = 0.0
+lambda = 0.0

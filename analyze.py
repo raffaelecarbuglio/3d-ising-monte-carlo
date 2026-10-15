@@ -48,6 +48,20 @@ def read_header(filename):
     return lattice_size, beta
 
 
+def read_perturbation_header(filename):
+    # Conserva la descrizione della dinamica nei risultati dell'analisi.
+    keys = ("sigma", "lambda", "q4", "q8", "q12", "u", "v")
+    lines = []
+    open_file = gzip.open if str(filename).endswith(".gz") else open
+    with open_file(filename, "rt", encoding="utf-8") as file:
+        for line in file:
+            if not line.startswith("#"):
+                break
+            if any(line.startswith(f"# {key} =") for key in keys):
+                lines.append(line.rstrip() + "\n")
+    return "".join(lines)
+
+
 def normalize_data(data, lattice_size):
     if data.size == 0:
         raise ValueError("il file non contiene misure")
@@ -336,10 +350,12 @@ def save_blocks(
     block_averages,
     observables,
     errors,
+    perturbation_header="",
 ):
     with open(filename, "w", encoding="utf-8") as file:
         file.write(f"# L = {lattice_size}\n")
         file.write(f"# beta = {beta:.17g}\n")
+        file.write(perturbation_header)
         file.write(f"# block_size = {block_size}\n")
         file.write(f"# number_of_blocks = {len(block_averages)}\n")
         file.write(f"# Rxi = {observables['r_xi']:.17g}\n")
@@ -381,11 +397,12 @@ def print_results(
     print(f"R_xi = {observables['r_xi']:.10g} +/- {errors['r_xi']:.3g}")
 
 
-def save_summary(filename, lattice_size, beta, observables, errors):
+def save_summary(filename, lattice_size, beta, observables, errors, perturbation_header=""):
     # Riusa i risultati del jackknife: non ricalcola le osservabili.
     with open(filename, "a", encoding="utf-8") as file:
         if file.tell() == 0:
             file.write("# L beta Rxi err_Rxi U err_U\n")
+        file.write(perturbation_header)
         file.write(
             f"{lattice_size} {beta:.17g} "
             f"{observables['r_xi']:.17g} {errors['r_xi']:.17g} "
@@ -416,6 +433,7 @@ def main():
     arguments = parser.parse_args()
 
     try:
+        perturbation_header = read_perturbation_header(arguments.filename)
         lattice_size, beta, total, results, block_averages = analyze_streaming(
             arguments.filename, arguments.block_size
         )
@@ -433,16 +451,19 @@ def main():
             block_averages,
             observables,
             errors,
+            perturbation_header,
         )
         if arguments.summary_output is not None:
             save_summary(
-                arguments.summary_output, lattice_size, beta, observables, errors
+                arguments.summary_output, lattice_size, beta, observables, errors,
+                perturbation_header,
             )
     except (OSError, ValueError) as error:
         print(f"Errore: {error}", file=sys.stderr)
         return 1
 
     print(f"block averages: {blocks_output}")
+    print(perturbation_header, end="")
     print()
     print_results(
         arguments.filename,

@@ -17,7 +17,7 @@ REPLICAS=2 N_THERM=100 N_SWEEPS=1000 \
 ./cluster/submit.sh runs/test_L8
 ```
 
-Each beta gets `REPLICAS` simulations with distinct seeds, up to 32 per job. Defaults: `REPLICAS=2`, `BASE_SEED=200000`, `N_THERM=50000`, `N_SWEEPS=1000000`, `MEASURE_EVERY=10`, `ALGORITHM=metropolis`, `SIGMA=0`. Use a different seed range for each campaign. Wolff requires `SIGMA=0`. The generated inputs are in `inputs/`, outputs in `results/`, and logs in `logs/` inside the run directory.
+Each beta gets `REPLICAS` simulations with distinct seeds, up to 32 per job. Defaults: `REPLICAS=2`, `BASE_SEED=200000`, `N_THERM=50000`, `N_SWEEPS=1000000`, `MEASURE_EVERY=10`, `ALGORITHM=metropolis`, `SIGMA=0`, `LAMBDA=0`. Use a different seed range for each campaign. For energy rounding use `LAMBDA=0.55 SIGMA=0`; choose the beta grid around its shifted transition. Gaussian noise and rounding cannot both be enabled. Wolff requires `SIGMA=0 LAMBDA=0`. The generated inputs are in `inputs/`, outputs in `results/`, and logs in `logs/` inside the run directory.
 
 Check seeds across all batches under `runs/` with `python3 cluster/check_seeds.py runs`. You can also pass several batch directories. The checker reads `.in` files, reports repeated seeds and their file paths, and exits with an error if duplicates are found. It only checks the inputs currently present; keep copies of old inputs if you want to include past runs.
 
