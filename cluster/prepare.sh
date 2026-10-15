@@ -32,6 +32,7 @@ algorithm = ${ALGORITHM:-metropolis}
 config_file = results/${name}_config.dat
 data_file = results/${name}_data.dat
 sigma = ${SIGMA:-0}
+lambda = ${LAMBDA:-0}
 EOF
         id=$((id + 1))
     done

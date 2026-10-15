@@ -167,7 +167,13 @@ double ising_noisy_acceptance(int delta_energy, double beta, double sigma)
     return fmin(1.0, 0.5 * erfc(a / sqrt(2.0)) + tail);
 }
 
-int ising_metropolis_sweep(IsingLattice *lattice, double beta, double sigma, Pcg32 *rng)
+double ising_rounded_energy(int delta_energy, double lambda)
+{
+    return lambda > 0.0 ? round(lambda * delta_energy) / lambda : delta_energy;
+}
+
+int ising_metropolis_sweep(IsingLattice *lattice, double beta, double sigma,
+                           double lambda, Pcg32 *rng)
 {
     double acceptance_probability[4];
     /* Cache per le simulazioni seriali; aggiornata se cambiano i parametri. */
@@ -179,9 +185,10 @@ int ising_metropolis_sweep(IsingLattice *lattice, double beta, double sigma, Pcg
     int z;
 
     /* I soli delta E positivi possibili sono 4, 8 e 12. */
-    acceptance_probability[1] = exp(-4.0 * beta);
-    acceptance_probability[2] = exp(-8.0 * beta);
-    acceptance_probability[3] = exp(-12.0 * beta);
+    for (int k = 1; k <= 3; k++) {
+        double delta = ising_rounded_energy(4 * k, lambda);
+        acceptance_probability[k] = exp(-beta * delta);
+    }
 
     if (sigma > 0.0 && (beta != cached_beta || sigma != cached_sigma)) {
         for (int j = 0; j < 7; j++) {
@@ -207,7 +214,7 @@ int ising_metropolis_sweep(IsingLattice *lattice, double beta, double sigma, Pcg
                     double probability = noisy_probability[delta_energy / 4 + 3];
                     accept = probability >= 1.0 || pcg32_uniform(rng) < probability;
                 } else {
-                    /* Caso pulito: stesse probabilita' e stessa sequenza RNG. */
+                    /* Metropolis pulito o con arrotondamento deterministico. */
                     accept = delta_energy <= 0 ||
                              pcg32_uniform(rng) < acceptance_probability[delta_energy / 4];
                 }

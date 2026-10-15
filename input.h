@@ -18,6 +18,7 @@ typedef struct {
     int L;
     double beta;
     double sigma;
+    double lambda;
     int n_therm;
     int n_sweeps;
     int measure_every;

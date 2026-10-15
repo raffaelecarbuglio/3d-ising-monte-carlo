@@ -22,6 +22,7 @@ class GridTests(unittest.TestCase):
                 opener = gzip.open if suffix.endswith(".gz") else open
                 with opener(path, "wt") as file:
                     file.write(f"# L = 4\n# beta = {0.2 + i * 0.001}\n")
+                    file.write("# sigma = 0\n# lambda = 0.55\n# u = 0\n# v = 0.5\n")
                     file.write("1 -64 32 1\n2 -128 -48 2\n3 -96 40 1.5\n4 -64 -32 1\n")
 
             env = dict(os.environ, ANALYSIS_JOBS="2")
@@ -30,6 +31,8 @@ class GridTests(unittest.TestCase):
             self.assertEqual(parallel.returncode, 0, parallel.stdout + parallel.stderr)
             summary = (root / "batch/scaling_summary.txt").read_bytes()
             blocks = {p.name: p.read_bytes() for p in results.glob("*_blocks.txt")}
+            self.assertEqual(summary.count(b"# lambda = 0.55"), 4)
+            self.assertTrue(all(b"# lambda = 0.55" in content for content in blocks.values()))
 
             serial = subprocess.run(command, cwd=root, env=dict(env, ANALYSIS_JOBS="1"),
                                     capture_output=True, text=True)

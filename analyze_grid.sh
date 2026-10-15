@@ -163,7 +163,7 @@ wait_batch() {
             echo "ERROR: analysis failed for '${DATA_FILES[$index]}'. See: $LOG_FILE" >&2
             failed=1
         else
-            awk '!/^#/' "$TMP_ANALYSIS/$index.summary" >> "$SUMMARY_FILE"
+            awk '!/^# L beta/' "$TMP_ANALYSIS/$index.summary" >> "$SUMMARY_FILE"
             successes=$((successes + 1))
         fi
         cat "$TMP_ANALYSIS/$index.log" >> "$LOG_FILE"

@@ -3,7 +3,7 @@
 MSc thesis project in Theoretical Physics at the University of Pisa, studying whether controlled numerical perturbations change the universal critical properties of the 3D Ising model.
 
 - **C11:** Metropolis and Wolff simulations on a periodic cubic lattice.
-- **Perturbations:** optional independent Gaussian noise in the Metropolis energy difference.
+- **Perturbations:** independent Gaussian noise or deterministic rounding of the Metropolis energy difference.
 - **Python:** observables, blocking, jackknife errors, and finite-size-scaling fits with block bootstrap.
 
 ## Quick start
@@ -25,7 +25,9 @@ Tests are kept in [`tests/`](tests/); run them with `make test` and `make test-a
 
 The bundled input is a tiny demonstration. For scientific runs, increase thermalization and sampling, and choose a block size using [blocking_plot.py](blocking_plot.py).
 
-Edit [inputs/input_example.dat](inputs/input_example.dat) to set lattice size, temperature, run length, seed, and algorithm. Set `sigma > 0` for noisy Metropolis; Wolff requires `sigma = 0`. One Wolff “sweep” means one cluster update.
+Edit [inputs/input_example.dat](inputs/input_example.dat) to set lattice size, temperature, run length, seed, and algorithm. Optional final fields `sigma` and `lambda` default to zero. Set `sigma > 0` for Gaussian noise, or `lambda > 0` for `round(lambda * delta_E) / lambda`; enable only one. Wolff requires both to be zero. One Wolff “sweep” means one cluster update.
+
+For rounding, try `sigma = 0` and `lambda = 0.55`. The four families at strength `1/m = 1/2` use lambda `0.55, 0.60, 0.40, 0.45`. Keep lambda fixed while scanning beta; locate the shifted transition before production runs. Outputs record lambda and the rounded costs and ratios. A restart into the same data file requires the same sigma and lambda. `run_metropolis.sh` and `cluster/prepare.sh` accept `LAMBDA=...` (default zero), alongside `SIGMA=...`.
 
 ## Further analysis
 

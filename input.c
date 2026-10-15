@@ -62,16 +62,40 @@ int input_read(const char *filename, SimulationParameters *parameters)
         return 0;
     }
 
-    /* Campo finale opzionale: gli input precedenti restano validi. */
+    /* Campi finali opzionali, in qualsiasi ordine. */
     parameters->sigma = 0.0;
-    if (fscanf(file, " %c", &extra) == 1) {
+    parameters->lambda = 0.0;
+    int seen_sigma = 0, seen_lambda = 0;
+    while (fscanf(file, " %c", &extra) == 1) {
+        char name[32];
+        double value;
         ungetc(extra, file);
-        if (fscanf(file, "sigma = %lf", &parameters->sigma) != 1 ||
-            fscanf(file, " %c", &extra) == 1) {
-            fprintf(stderr, "Errore: atteso sigma = valore alla fine dell'input.\n");
+        if (fscanf(file, " %31[^= \t\r\n] = %lf", name, &value) != 2) {
+            fprintf(stderr, "Errore: atteso sigma = valore oppure lambda = valore.\n");
             fclose(file);
             return 0;
         }
+        if (strcmp(name, "sigma") == 0 && !seen_sigma) {
+            parameters->sigma = value;
+            seen_sigma = 1;
+        } else if (strcmp(name, "lambda") == 0 && !seen_lambda) {
+            parameters->lambda = value;
+            seen_lambda = 1;
+        } else {
+            fprintf(stderr, "Errore: campo opzionale sconosciuto o ripetuto: %s.\n", name);
+            fclose(file);
+            return 0;
+        }
+    }
+
+    if (!isfinite(parameters->lambda) || parameters->lambda < 0.0 ||
+        !isfinite(12.0 * parameters->lambda) ||
+        (parameters->lambda > 0.0 &&
+         (parameters->sigma > 0.0 || parameters->algorithm == ALGORITHM_WOLFF))) {
+        fprintf(stderr, "Errore: lambda deve essere finito, >= 0 e con 12*lambda finito; "
+                        "se positivo richiede Metropolis e sigma = 0.\n");
+        fclose(file);
+        return 0;
     }
     if (!isfinite(parameters->sigma) || parameters->sigma < 0.0 ||
         (parameters->algorithm == ALGORITHM_WOLFF && parameters->sigma != 0.0)) {
