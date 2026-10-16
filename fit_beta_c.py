@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fit di R_xi(beta,L): fit lineare a beta_c fissato, poi bootstrap dei blocchi."""
+"""Fit di R_xi o U(beta,L): fit lineare a beta_c fissato, poi bootstrap dei blocchi."""
 
 import argparse
 import math
@@ -22,18 +22,23 @@ def design_matrix(beta, sizes, beta_c, degree_main, degree_correction):
     return np.column_stack((main, sizes[:, None] ** (-OMEGA) * correction))
 
 
-def fit_at_beta_c(beta, r_xi, errors, sizes, beta_c, p, q):
+def fit_at_beta_c(beta, values, errors, sizes, beta_c, p, q, critical_value=None):
     matrix = design_matrix(beta, sizes, beta_c, p, q)
+    offset = 0.0 if critical_value is None else critical_value
+    if critical_value is not None:
+        matrix = matrix[:, 1:]
     coefficients, _, rank, _ = np.linalg.lstsq(
-        matrix / errors[:, None], r_xi / errors, rcond=None
+        matrix / errors[:, None], (values - offset) / errors, rcond=None
     )
     if rank < matrix.shape[1]:
         raise ValueError("fit singolare: ridurre il grado del polinomio")
-    residuals = (r_xi - matrix @ coefficients) / errors
+    residuals = (values - offset - matrix @ coefficients) / errors
+    if critical_value is not None:
+        coefficients = np.r_[critical_value, coefficients]
     return coefficients, float(residuals @ residuals)
 
 
-def make_fitter(beta, errors, sizes, p, q, beta_min, beta_max):
+def make_fitter(beta, errors, sizes, p, q, beta_min, beta_max, critical_value=None):
     """Prepare fixed inputs once; return a fit usable for bootstrap replicas."""
     beta, errors, sizes = [np.asarray(v, dtype=float) for v in (beta, errors, sizes)]
     if any(v.ndim != 1 or v.shape != beta.shape or not np.all(np.isfinite(v))
@@ -43,9 +48,12 @@ def make_fitter(beta, errors, sizes, p, q, beta_min, beta_max):
         raise ValueError("servono errori positivi e L > 1")
     if p < 1 or q < 0:
         raise ValueError("servono degree-main >= 1 e degree-correction >= 0")
-    if len(np.unique(sizes)) < 3:
-        raise ValueError("servono almeno 3 taglie: con due taglie beta_c puo' essere indeterminato")
-    dof = len(beta) - (p + q + 2) - 1
+    if critical_value is not None and not np.isfinite(critical_value):
+        raise ValueError("il valore critico deve essere finito")
+    minimum_sizes = 3 if critical_value is None else 2
+    if len(np.unique(sizes)) < minimum_sizes:
+        raise ValueError(f"servono almeno {minimum_sizes} taglie per vincolare beta_c")
+    dof = len(beta) - (p + q + 2) - 1 + (critical_value is not None)
     if dof <= 0:
         raise ValueError("servono piu' punti dei parametri di fit")
     if not np.isfinite([beta_min, beta_max]).all() or beta_min >= beta_max:
@@ -54,10 +62,10 @@ def make_fitter(beta, errors, sizes, p, q, beta_min, beta_max):
     def fit(r_xi):
         r_xi = np.asarray(r_xi, dtype=float)
         if r_xi.shape != beta.shape or not np.isfinite(r_xi).all():
-            raise ValueError("Rxi deve essere un vettore finito della stessa lunghezza di beta")
+            raise ValueError("l'osservabile deve essere un vettore finito della stessa lunghezza di beta")
 
         def objective(value):
-            return fit_at_beta_c(beta, r_xi, errors, sizes, value, p, q)[1]
+            return fit_at_beta_c(beta, r_xi, errors, sizes, value, p, q, critical_value)[1]
 
         grid = np.linspace(beta_min, beta_max, 31)
         values = np.array([objective(value) for value in grid])
@@ -79,7 +87,7 @@ def make_fitter(beta, errors, sizes, p, q, beta_min, beta_max):
                 x2 = left + golden * (right - left)
                 f2 = objective(x2)
         beta_c = (left + right) / 2.0
-        coefficients, chi2 = fit_at_beta_c(beta, r_xi, errors, sizes, beta_c, p, q)
+        coefficients, chi2 = fit_at_beta_c(beta, r_xi, errors, sizes, beta_c, p, q, critical_value)
         if min(beta_c - beta_min, beta_max - beta_c) <= (beta_max - beta_min) * 1e-8:
             raise ValueError("minimo al bordo: ampliare l'intervallo in beta")
         if min(values[0], values[-1]) <= chi2 + 1.0:
@@ -89,25 +97,45 @@ def make_fitter(beta, errors, sizes, p, q, beta_min, beta_max):
     return fit
 
 
-def bootstrap_fits(points, fit, replicas, seed):
+def bootstrap_fits(points, fit, replicas, seed, observable="Rxi"):
+    index = ("Rxi", "U").index(observable)
     rng = np.random.default_rng(seed)
     samples = []
     for replica in range(replicas):
         try:
-            beta_c, coefficients, _, _ = fit([bootstrap_pair(point, rng)[0] for point in points])
+            beta_c, coefficients, _, _ = fit([bootstrap_pair(point, rng)[index] for point in points])
         except ValueError as error:
             raise ValueError(f"bootstrap {replica + 1}/{replicas}: {error}") from error
         samples.append(np.r_[beta_c, coefficients])
     return np.array(samples)
 
 
-def save_plot(points, beta_c, coefficients, p, q, output):
+def fit_points(points, observable, p, q, replicas, seed, beta_min=None, beta_max=None,
+               critical_value=None):
+    if replicas < 2:
+        raise ValueError("servono almeno 2 repliche bootstrap")
+    if not points:
+        raise ValueError("nessun punto selezionato")
+    beta, values, errors, sizes = (
+        np.array([point[key] for point in points])
+        for key in ("beta", observable, "err_" + observable, "L")
+    )
+    fit = make_fitter(beta, errors, sizes, p, q,
+                      beta.min() if beta_min is None else beta_min,
+                      beta.max() if beta_max is None else beta_max, critical_value)
+    result = fit(values)
+    # Same point order and seed pair the Rxi and U bootstrap fits.
+    samples = bootstrap_fits(points, fit, replicas, seed, observable)
+    return result, samples
+
+
+def save_plot(points, beta_c, coefficients, p, q, output, observable="Rxi"):
     figure, axis = plt.subplots(figsize=(6.3, 4.7))
     for index, size in enumerate(sorted({point["L"] for point in points})):
         selected = [point for point in points if point["L"] == size]
         beta = np.array([point["beta"] for point in selected])
-        axis.errorbar(beta, [point["Rxi"] for point in selected],
-                      yerr=[point["err_Rxi"] for point in selected],
+        axis.errorbar(beta, [point[observable] for point in selected],
+                      yerr=[point["err_" + observable] for point in selected],
                       fmt="none", color=f"C{index}", elinewidth=0.8,
                       capsize=2, capthick=0.8, label=fr"$L={size}$")
         grid = np.linspace(beta.min(), beta.max(), 200)
@@ -115,7 +143,7 @@ def save_plot(points, beta_c, coefficients, p, q, output):
                   color=f"C{index}", linewidth=1)
     axis.axvline(beta_c, color="black", linewidth=1, linestyle="--")
     axis.set_xlabel(r"$\beta$")
-    axis.set_ylabel(r"$R_\xi$")
+    axis.set_ylabel(r"$R_\xi$" if observable == "Rxi" else "$U$")
     axis.tick_params(direction="in", top=True, right=True)
     axis.legend(frameon=False, ncol=2)
     figure.tight_layout()
@@ -125,8 +153,10 @@ def save_plot(points, beta_c, coefficients, p, q, output):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Fit FSS di R_xi(beta, L) per beta_c")
+    parser = argparse.ArgumentParser(description="Fit FSS di R_xi o U(beta, L) per beta_c")
     parser.add_argument("inputs", nargs="+", help="file o directory con *_blocks.txt")
+    parser.add_argument("--observable", choices=("Rxi", "U"), default="Rxi")
+    parser.add_argument("--critical-value", type=float, help="valore critico fissato (default: libero)")
     parser.add_argument("--sizes", nargs="+", type=int)
     parser.add_argument("--degree-main", type=int, default=2)
     parser.add_argument("--degree-correction", type=int, default=1)
@@ -154,19 +184,21 @@ def main():
         if args.sizes is not None and set(args.sizes) != set(sizes):
             raise ValueError("una taglia richiesta non ha punti nella finestra Rxi")
         points.sort(key=lambda point: (point["L"], point["beta"]))
-        beta, r_xi, errors, lattice_sizes = (
-            np.array([point[key] for point in points]) for key in ("beta", "Rxi", "err_Rxi", "L")
-        )
+        beta = np.array([point["beta"] for point in points])
         beta_min = beta.min() if args.beta_min is None else args.beta_min
         beta_max = beta.max() if args.beta_max is None else args.beta_max
         p, q = args.degree_main, args.degree_correction
-        fit = make_fitter(beta, errors, lattice_sizes, p, q, beta_min, beta_max)
-        beta_c, coefficients, chi2, dof = fit(r_xi)
-        samples = bootstrap_fits(points, fit, args.bootstrap, args.seed)
+        (beta_c, coefficients, chi2, dof), samples = fit_points(
+            points, args.observable, p, q, args.bootstrap, args.seed,
+            beta_min, beta_max, args.critical_value)
         beta_c_error, *coefficient_errors = np.std(samples, axis=0, ddof=1)
+        if args.critical_value is not None:
+            coefficient_errors[0] = 0.0
 
         # Un solo resoconto, usato sia per il file sia per il terminale.
-        report = [f"nu = {NU} (fixed)", f"omega = {OMEGA} (fixed)",
+        report = [f"observable = {args.observable}",
+                  f"critical value = {args.critical_value if args.critical_value is not None else 'free'}",
+                  f"nu = {NU} (fixed)", f"omega = {OMEGA} (fixed)",
                   "sizes = " + " ".join(map(str, sizes)),
                   f"Rxi range = {args.r_min} {args.r_max}",
                   f"beta search range = {beta_min:.17g} {beta_max:.17g}",
@@ -175,7 +207,7 @@ def main():
                   f"chi2/dof = {chi2:.10g}/{dof} = {chi2 / dof:.10g}",
                   f"bootstrap replicas = {args.bootstrap}", f"bootstrap seed = {args.seed}",
                   f"beta_c = {beta_c:.17g} {beta_c_error:.17g}",
-                  f"Rxi_star = {coefficients[0]:.17g} {coefficient_errors[0]:.17g}",
+                  f"{args.observable}_star = {coefficients[0]:.17g} {coefficient_errors[0]:.17g}",
                   "", "# parameter value bootstrap_std"]
         labels = [f"a{k}" for k in range(p + 1)] + [f"b{k}" for k in range(q + 1)]
         report += [f"{name} {value:.17g} {error:.17g}"
@@ -184,7 +216,7 @@ def main():
         prefix.parent.mkdir(parents=True, exist_ok=True)
         summary_file = prefix.with_name(prefix.name + "_summary.txt")
         plot_file = prefix.with_suffix(".png")
-        save_plot(points, beta_c, coefficients, p, q, plot_file)
+        save_plot(points, beta_c, coefficients, p, q, plot_file, args.observable)
         summary_file.write_text("\n".join(report) + "\n", encoding="utf-8")
     except (OSError, ValueError, np.linalg.LinAlgError) as error:
         print(f"Errore: {error}", file=sys.stderr)

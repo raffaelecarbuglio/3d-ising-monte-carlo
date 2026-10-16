@@ -11,6 +11,7 @@ from fit_beta_c import (
     bootstrap_fits,
     design_matrix,
     fit_at_beta_c,
+    fit_points,
     make_fitter,
 )
 from fit_scaling import OMEGA
@@ -134,6 +135,62 @@ class FitBetaCTests(unittest.TestCase):
                                     capture_output=True, text=True)
             self.assertEqual(result.returncode, 1)
             self.assertIn("taglia richiesta", result.stderr)
+
+    def joint_points(self):
+        points = self.block_points()
+        for point in points:
+            r, size = point["Rxi"], point["L"]
+            point["U"], point["err_U"] = 2.24 - r, point["err_Rxi"]
+            g0 = point["blocks"][:, 0]
+            derivative = 1 / (2 * (2 * size * np.sin(np.pi / size))**2 * r)
+            point["blocks"][:, 3] = point["U"] - derivative * (g0 - g0.mean())
+        return points
+
+    def test_fixed_critical_value_recovers_u_and_counts_parameters(self):
+        beta, r, errors, sizes = self.sample((24, 32))
+        fit = make_fitter(beta, errors, sizes, 2, 1, .221, .226, critical_value=1.6)
+        value, coefficients, chi2, dof = fit(2.24 - r)
+        self.assertAlmostEqual(value, .2234, places=9)
+        self.assertEqual(coefficients[0], 1.6)
+        self.assertEqual(dof, len(beta) - 5)
+        self.assertLess(chi2, 1e-12)
+
+    def test_paired_observable_comparison_and_scan_failures(self):
+        from check_beta_c_stability import scan
+        points = self.joint_points()
+        results = [fit_points(points, obs, 2, 1, 6, 123, .221, .226)
+                   for obs in ("Rxi", "U")]
+        r, u = [result[1][:, 0] for result in results]
+        self.assertLess(np.std(u-r), .05 * np.hypot(np.std(r), np.std(u)))
+        rows = scan(points, [(16, .45, .75, 2, 1), (24, .45, .75, 2, 1)],
+                    6, 123, .221, .226)
+        self.assertEqual([row["status"] for row in rows[:3]], ["ok"] * 3)
+        self.assertAlmostEqual(rows[2]["error"], np.std(u-r, ddof=1))
+        self.assertTrue(all("almeno 3 taglie" in row["status"] for row in rows[3:]))
+
+    def test_u_and_stability_commands(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            for i, point in enumerate(self.joint_points()):
+                header = "\n".join(f"{k} = {v}" for k, v in point.items() if k != "blocks")
+                np.savetxt(directory / f"run{i}_blocks.txt", point["blocks"], header=header)
+            root = Path(__file__).resolve().parent.parent
+            common = [str(directory), "--bootstrap", "3", "--beta-min", ".221", "--beta-max", ".226"]
+            result = subprocess.run([sys.executable, str(root / "fit_beta_c.py"), *common,
+                                     "--observable", "U", "--critical-value", "1.6",
+                                     "--output-prefix", str(directory / "u")], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("U_star = 1.6", (directory / "u_summary.txt").read_text())
+            configs = directory / "fits.txt"
+            configs.write_text("16 .45 .75 2 1\n24 .45 .75 2 1\n")
+            result = subprocess.run([sys.executable, str(root / "check_beta_c_stability.py"), *common,
+                                     "--fits", str(configs), "--output-prefix", str(directory / "scan")],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = (directory / "scan.csv").read_text()
+            self.assertIn("U-Rxi", report)
+            self.assertIn("almeno 3 taglie", report)
+            self.assertGreater((directory / "scan.pdf").stat().st_size, 1000)
 
     def test_design_matrix(self):
         beta = np.array([0.220, 0.222])

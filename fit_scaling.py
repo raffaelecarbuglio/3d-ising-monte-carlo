@@ -90,6 +90,20 @@ def asymptotic_curve(coefficients, r_xi, degree_main):
     )
 
 
+def critical_check(coefficients, samples, degree, reference, covariance=0.0):
+    """Linear error propagation; literature values independent of simulation data."""
+    r, err_r, u, err_u = reference
+    if (not np.isfinite([r, err_r, u, err_u, covariance]).all()
+            or err_r < 0 or err_u < 0 or abs(covariance) > err_r * err_u):
+        raise ValueError("riferimento critico: valori finiti, errori >= 0 e covarianza ammissibile")
+    value = float(asymptotic_curve(coefficients, r, degree))
+    stat = np.std([asymptotic_curve(c, r, degree) for c in samples], ddof=1)
+    slope = np.polynomial.polynomial.polyval(
+        r, np.polynomial.polynomial.polyder(coefficients[:degree + 1]))
+    error = np.sqrt(stat**2 + (slope * err_r)**2 + err_u**2 - 2 * slope * covariance)
+    return value, stat, value - u, error
+
+
 def observable_pairs(means, size):
     """Reconstruct (Rxi,U) from rows of (g_zero,g_min,m2,m4) means."""
     means = np.asarray(means)
@@ -158,10 +172,18 @@ def main():
     parser.add_argument("--r-max", type=float, default=1.00)
     parser.add_argument("--bootstrap", type=int, default=2000)
     parser.add_argument("--seed", type=int, default=12345)
+    parser.add_argument("--critical-point", nargs=4, type=float,
+                        metavar=("RXI", "ERR_RXI", "U", "ERR_U"), help="valori critici di riferimento")
+    parser.add_argument("--critical-covariance", type=float, default=0.0,
+                        help="Cov(Rxi*, U*) del riferimento; default 0")
     parser.add_argument("--output-prefix", default="scaling_fit")
     args = parser.parse_args()
 
     try:
+        if args.critical_covariance != 0 and args.critical_point is None:
+            raise ValueError("critical-covariance richiede critical-point")
+        if args.critical_point is not None and not args.r_min <= args.critical_point[0] <= args.r_max:
+            raise ValueError("Rxi critico fuori dall'intervallo del fit")
         points = [read_block_file(path) for path in find_block_files(args.inputs)]
         sizes = sorted({point["L"] for point in points}) if args.sizes is None else args.sizes
         points = [
@@ -202,6 +224,17 @@ def main():
         low, high = np.percentile(curves, [16.0, 84.0], axis=0)
         coefficient_errors = np.std(bootstrap_coefficients, axis=0, ddof=1)
 
+        check_report = ""
+        if args.critical_point is not None:
+            value, stat, difference, error = critical_check(
+                coefficients, bootstrap_coefficients, args.degree_main,
+                args.critical_point, args.critical_covariance)
+            check_report = (f"critical reference (Rxi err_Rxi U err_U) = {args.critical_point}\n"
+                            f"reference covariance = {args.critical_covariance}\n"
+                            f"U_infinity(Rxi_star) = {value:.10g} {stat:.10g} (fit statistical error)\n"
+                            f"difference from U_star = {difference:.10g} {error:.10g}\n"
+                            "difference error: fit + reference, linear propagation; no fit systematics\n")
+
         prefix = Path(args.output_prefix)
         prefix.parent.mkdir(parents=True, exist_ok=True)
         curve_file = prefix.with_name(prefix.name + "_curve.txt")
@@ -223,6 +256,7 @@ def main():
             file.write(f"chi2/dof = {chi2:.10g}/{dof} = {chi2 / dof:.10g}\n")
             file.write(f"bootstrap replicas = {args.bootstrap}\n")
             file.write(f"bootstrap seed = {args.seed}\n\n")
+            file.write(check_report)
             file.write("# parameter value bootstrap_std\n")
             labels = [f"b{k}" for k in range(args.degree_main + 1)]
             labels += [f"c{k}" for k in range(args.degree_correction + 1)]
@@ -235,6 +269,8 @@ def main():
         print(f"Errore: {error}", file=sys.stderr)
         return 1
 
+    if check_report:
+        print(check_report, end="")
     print(f"omega = {OMEGA} (fixed)")
     print("sizes = " + " ".join(map(str, sizes)))
     print(f"points = {len(points)}")
