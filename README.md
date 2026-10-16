@@ -33,7 +33,18 @@ For rounding, try `sigma = 0` and `lambda = 0.55`. The four families at strength
 
 - [fit_scaling.py](fit_scaling.py): universal scaling curve and finite-size corrections.
 - [compare_universality.py](compare_universality.py): perturbed data against the saved Wolff reference.
-- [fit_beta_c.py](fit_beta_c.py): critical inverse temperature, assuming Ising exponents.
+- [fit_beta_c.py](fit_beta_c.py): critical inverse temperature from `--observable Rxi` (default) or `U`, assuming Ising exponents. Optional `--critical-value VALUE` fixes the observable's critical value.
+- [check_beta_c_stability.py](check_beta_c_stability.py): both observables, varying minimum size, fit window and polynomial degrees; CSV results and a comparison PDF.
+
+For example: `python3 check_beta_c_stability.py runs/sigma5 --output-prefix results/sigma5_stability`.
+The seven default fits change one choice at a time from `L_min=16`, `0.50 <= Rxi <= 0.80`, degrees `(2,1)`.
+Override them with `--fits FILE`: five whitespace-separated columns `L_min r_min r_max p q`, one fit per row.
+Both observables use the same points and paired block resamples; CSV rows `U-Rxi` report the difference between their beta estimates with its correlated statistical error.
+Failed fits are recorded, not silently discarded. At least three sizes are required with a free critical value, or two with a fixed value. Inspect chi-squared and stability before assigning systematic errors; the scan does not automatically turn the spread into an uncertainty.
+Use `--rxi-star VALUE --u-star VALUE` for fixed critical values; their uncertainties are not included in these conditional fits.
+
+For the clean-curve check, add `--critical-point RXI ERR_RXI U ERR_U` to `fit_scaling.py`, using literature values in the same conventions and geometry.
+The summary reports `U_infinity(Rxi_star)` and its difference from the reference, with linear propagation of reference uncertainties and bootstrap fit uncertainty. `--critical-covariance VALUE` optionally supplies the reference covariance (default zero); reference values are assumed independent of the simulations. Fit systematics remain separate.
 
 Use `python3 <script> --help` for analysis options. Parameter scans are provided by [run_metropolis.sh](run_metropolis.sh) and [run_wolff.sh](run_wolff.sh).
 

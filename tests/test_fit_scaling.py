@@ -8,6 +8,7 @@ from fit_scaling import (
     OMEGA,
     asymptotic_curve,
     bootstrap_pair,
+    critical_check,
     design_matrix,
     fit,
     read_block_file,
@@ -47,6 +48,18 @@ class FitScalingTests(unittest.TestCase):
             asymptotic_curve(coefficients, np.array([0.4]), 2)[0],
             expected[0] + expected[1] * 0.4 + expected[2] * 0.4**2,
         )
+
+    def test_critical_check_propagates_fit_and_reference_covariance(self):
+        coefficients = np.array([2., -.5, .1])
+        samples = np.array([coefficients + [shift, 0, 0] for shift in (-.01, 0, .01)])
+        value, stat, difference, error = critical_check(
+            coefficients, samples, 1, [.6, .02, 1.69, .03], covariance=.0003)
+        self.assertAlmostEqual(value, 1.7)
+        self.assertAlmostEqual(stat, .01)
+        self.assertAlmostEqual(difference, .01)
+        self.assertAlmostEqual(error**2, .01**2 + (.5*.02)**2 + .03**2 + .0003)
+        with self.assertRaises(ValueError):
+            critical_check(coefficients, samples, 1, [.6, .02, 1.69, .03], covariance=.001)
 
     def test_read_blocks_and_reproducible_bootstrap_pair(self):
         contents = """# L = 8
