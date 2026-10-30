@@ -1,0 +1,8 @@
+L = 8
+beta = 0.75
+n_therm = 1000
+n_sweeps = 5000
+measure_every = 10
+seed = 12345
+start = ordered
+data_file = data/z2_energy.dat
