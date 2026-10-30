@@ -21,3 +21,4 @@ data/*
 *.pfx
 credentials*
 secrets*
+/runs/
