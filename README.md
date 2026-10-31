@@ -30,6 +30,55 @@ Edit [inputs/input_example.dat](inputs/input_example.dat) to set lattice size, t
 
 For rounding, try `sigma = 0` and `lambda = 0.55`. The four families at strength `1/m = 1/2` use lambda `0.55, 0.60, 0.40, 0.45`. Keep lambda fixed while scanning beta; locate the shifted transition before production runs. Outputs record lambda and the rounded costs and ratios. A restart into the same data file requires the same sigma and lambda. `run_metropolis.sh` and `cluster/prepare.sh` accept `LAMBDA=...` (default zero), alongside `SIGMA=...`.
 
+## Campaigns from a configuration file
+
+Edit [`campaigns/sigma5.conf`](campaigns/sigma5.conf), then launch from the project directory:
+
+```bash
+nohup bash simulate.sh campaigns/sigma5.conf > sigma5.log 2>&1 &
+```
+
+The launcher builds `ising`, creates a unique directory under `runs/`, and prints its path.
+It saves `campaign.conf`, individual `.in` inputs, simulation logs, and a `runs.csv`
+status table there. Each `BETA_GRID` row contains `L` followed by explicit beta values.
+Seeds are `BASE_SEED`, `BASE_SEED+1`, etc., in grid order; larger lattices launch first,
+in groups of up to `MAX_JOBS`. An unsuccessful group stops the campaign before the next group.
+
+Choose an unused `BASE_SEED` before each campaign. The launcher rejects reuse against
+saved `.in` files in `SEED_HISTORY` (by default this project); add other directories if
+older inputs live elsewhere. It cannot check missing inputs or reserve seeds against
+another launcher preparing a campaign at exactly the same time. Failed preparation
+removes its unused batch; once simulations start, logs and inputs are retained.
+Existing history/history duplicates do not block an unrelated new seed range.
+
+Inspect representative blocking plateaus for each size before analysis, for example:
+
+```bash
+python3 blocking_plot.py runs/YOUR_BATCH/results/L32_b0p383703000_data.dat
+```
+
+Set `BLOCK_SIZES` **in that batch's saved `campaign.conf`**, using `L:measurements`
+pairs such as `"8:256 16:512 24:1024 32:2048"` (illustrative values, not a plateau check).
+Then run:
+
+```bash
+bash analyse.sh runs/YOUR_BATCH
+```
+
+The wrapper requires every simulation to have status `OK`, runs `analyze_grid.sh`,
+and compares with `REFERENCE` if it is nonempty. Set `REFERENCE=""` to skip that comparison.
+Analysis uses the saved batch settings; editing the original campaign does not affect old batches.
+To switch to Wolff, copy the config and set `ALGORITHM=wolff`, `SIGMA=0`, `LAMBDA=0`,
+then choose an appropriate beta grid, run lengths and unused seeds. One Wolff sweep
+is one cluster update.
+
+Paths in configurations are relative to the project directory; output paths cannot
+contain spaces or commas because of the C input and CSV formats. The `.conf` files
+are ordinary Bash code and should be files you wrote or reviewed. The existing
+`run_metropolis.sh`, `run_wolff.sh` and direct `analyze_grid.sh` commands still work.
+These new launch commands run on the local machine; use the existing `cluster/`
+workflow for Slurm submission on INFN.
+
 ## Z2 gauge model
 
 The gauge simulator is in [`z2_gauge/`](z2_gauge/). From the repository root:
