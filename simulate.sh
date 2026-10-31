@@ -21,11 +21,16 @@ done
 [[ "${ALGORITHM:-}" == metropolis || "${ALGORITHM:-}" == wolff ]] || fail "Choose ALGORITHM=metropolis or wolff."
 SIGMA=${SIGMA:-0}
 LAMBDA=${LAMBDA:-0}
+NOISE_MODE=${NOISE_MODE:-independent}
+[[ "$NOISE_MODE" == independent || "$NOISE_MODE" == shared_sweep ]] || fail "Choose NOISE_MODE=independent or shared_sweep."
 awk -v s="$SIGMA" -v l="$LAMBDA" -v a="$ALGORITHM" 'BEGIN {
     number="^[0-9]+([.][0-9]*)?([eE][+-]?[0-9]+)?$|^[.][0-9]+([eE][+-]?[0-9]+)?$";
     exit !(s ~ number && l ~ number && s+0 < 1e308 && l+0 < 1e307 &&
            !(s>0 && l>0) && !(a=="wolff" && (s>0 || l>0)));
 }' || fail "Invalid SIGMA/LAMBDA: use one finite nonnegative perturbation; Wolff requires both zero."
+if [[ "$NOISE_MODE" == shared_sweep ]]; then
+    [[ "$ALGORITHM" == metropolis ]] && awk -v l="$LAMBDA" 'BEGIN { exit !(l == 0) }' || fail "shared_sweep requires Metropolis and LAMBDA=0."
+fi
 [[ ${#BETA_GRID[@]} -gt 0 ]] || fail "BETA_GRID is empty."
 
 OUTPUT_DIR=${OUTPUT_DIR:-runs}
@@ -79,6 +84,7 @@ config_file = $config
 data_file = $data
 sigma = $SIGMA
 lambda = $LAMBDA
+noise_mode = $NOISE_MODE
 EOF
         printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,PENDING,\n' "$name" "$L" "$beta" "$seed" "$N_THERM" "$N_SWEEPS" "$MEASURE_EVERY" "$input" "$data" "$config" "$log" >> "$BATCH/runs.csv"
         run_id=$((run_id + 1))

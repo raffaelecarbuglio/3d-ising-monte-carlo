@@ -169,7 +169,7 @@ static void test_lattice(void)
 
     pcg32_seed(&rng, 123);
     ising_fill_ordered(&lattice);
-    check(ising_metropolis_sweep(&lattice, 0.0, 0.0, 0.0, &rng) == lattice.n_spins,
+    check(ising_metropolis_sweep(&lattice, 0.0, 0.0, 0.0, NOISE_INDEPENDENT, &rng) == lattice.n_spins,
           "a beta=0 ogni sito e' aggiornato una volta");
 
     for (i = 0; i < lattice.n_spins; i++) {
@@ -200,8 +200,8 @@ static void test_reproducibility(double sigma)
     pcg32_seed(&rng_b, 9876);
 
     for (sweep = 0; sweep < 8; sweep++) {
-        ising_metropolis_sweep(&a, 0.22, sigma, 0.0, &rng_a);
-        ising_metropolis_sweep(&b, 0.22, sigma, 0.0, &rng_b);
+        ising_metropolis_sweep(&a, 0.22, sigma, 0.0, NOISE_INDEPENDENT, &rng_a);
+        ising_metropolis_sweep(&b, 0.22, sigma, 0.0, NOISE_INDEPENDENT, &rng_b);
     }
 
     check(same_spins(&a, &b),
@@ -254,7 +254,7 @@ static void test_noisy_acceptance(void)
                 pcg32_seed(&rng, seed);
                 pcg32_seed(&expected_rng, seed);
                 int flip = beta == 0.0 || pcg32_uniform(&expected_rng) < reference;
-                ising_metropolis_sweep(&lattice, beta, sigma, 0.0, &rng);
+                ising_metropolis_sweep(&lattice, beta, sigma, 0.0, NOISE_INDEPENDENT, &rng);
                 sweep_ok &= lattice.spins[0] == (flip ? -1 : 1);
             }
         }
@@ -297,7 +297,7 @@ static void test_rounding(void)
                 pcg32_seed(&rng, seed);
                 pcg32_seed(&reference_rng, seed);
                 int flip = d <= 0 || pcg32_uniform(&reference_rng) < exp(-0.22 * q);
-                ising_metropolis_sweep(&lattice, 0.22, 0.0, lambda, &rng);
+                ising_metropolis_sweep(&lattice, 0.22, 0.0, lambda, NOISE_INDEPENDENT, &rng);
                 flips_ok &= lattice.spins[0] == (flip ? -1 : 1);
             }
         }
@@ -308,13 +308,73 @@ static void test_rounding(void)
     ising_fill_random(&lattice, &rng);
     ising_fill_random(&clean, &clean_rng);
     for (int sweep = 0; sweep < 100; sweep++) {
-        ising_metropolis_sweep(&lattice, 0.22, 0.0, 1.0, &rng);
-        ising_metropolis_sweep(&clean, 0.22, 0.0, 0.0, &clean_rng);
+        ising_metropolis_sweep(&lattice, 0.22, 0.0, 1.0, NOISE_INDEPENDENT, &rng);
+        ising_metropolis_sweep(&clean, 0.22, 0.0, 0.0, NOISE_INDEPENDENT, &clean_rng);
         identical &= same_spins(&lattice, &clean);
     }
     check(costs_ok && flips_ok, "arrotondamento: costi e flip nei quattro versi e casi limite");
     check(identical, "lambda=1 e lambda=0: stessa traiettoria Metropolis");
     ising_destroy(&lattice);
+    ising_destroy(&clean);
+}
+
+/* Riferimento lento: ricava ogni costo dalla differenza delle energie totali,
+   senza usare ne' somma dei vicini ne' tabella delle probabilita'. */
+static void test_shared_noise(void)
+{
+    const double sigmas[] = {0.0, 0.5, 5.0};
+    int correct = 1, zero_limit = 1;
+    for (int L = 2; L <= 4; L++) {
+        for (int k = 0; k < 3; k++) {
+            IsingLattice actual, reference;
+            Pcg32 rng, expected_rng;
+            ising_create(&actual, L);
+            ising_create(&reference, L);
+            pcg32_seed(&rng, 123 + L);
+            ising_fill_random(&actual, &rng);
+            memcpy(reference.spins, actual.spins, L*L*L*sizeof(int));
+            expected_rng = rng;
+            for (int sweep = 0; sweep < 30; sweep++) {
+                double beta = sweep % 3 == 0 ? 0.0 : 0.22;
+                double eta = sigmas[k] > 0.0 ? sigmas[k] * pcg32_gaussian(&expected_rng) : 0.0;
+                int accepted = 0;
+                for (int site = 0; site < reference.n_spins; site++) {
+                    int energy = ising_total_energy(&reference);
+                    reference.spins[site] *= -1;
+                    double delta = ising_total_energy(&reference) - energy + eta;
+                    double probability = beta == 0.0 || delta <= 0.0 ? 1.0 : exp(-beta * delta);
+                    /* Il ramo pulito storico estrae anche per dE>0 a beta=0. */
+                    if ((sigmas[k] > 0.0 ? probability >= 1.0 : delta <= 0.0) ||
+                        pcg32_uniform(&expected_rng) < probability)
+                        accepted++;
+                    else
+                        reference.spins[site] *= -1;
+                }
+                int count = ising_metropolis_sweep(&actual, beta, sigmas[k], 0.0,
+                                                  NOISE_SHARED_SWEEP, &rng);
+                correct &= count == accepted && same_spins(&actual, &reference);
+                correct &= rng.state == expected_rng.state && rng.has_gaussian == expected_rng.has_gaussian;
+            }
+            ising_destroy(&actual);
+            ising_destroy(&reference);
+        }
+    }
+    IsingLattice shared, clean;
+    Pcg32 rng, clean_rng;
+    ising_create(&shared, 4);
+    ising_create(&clean, 4);
+    ising_fill_ordered(&shared);
+    ising_fill_ordered(&clean);
+    pcg32_seed(&rng, 42);
+    clean_rng = rng;
+    for (int sweep = 0; sweep < 30; sweep++) {
+        ising_metropolis_sweep(&shared, 0.22, 0.0, 0.0, NOISE_SHARED_SWEEP, &rng);
+        ising_metropolis_sweep(&clean, 0.22, 0.0, 0.0, NOISE_INDEPENDENT, &clean_rng);
+        zero_limit &= same_spins(&shared, &clean) && rng.state == clean_rng.state;
+    }
+    check(correct, "rumore condiviso: traiettoria e RNG coincidono con il riferimento esplicito");
+    check(zero_limit, "shared_sweep con sigma=0 conserva la traiettoria pulita e il RNG");
+    ising_destroy(&shared);
     ising_destroy(&clean);
 }
 
@@ -499,6 +559,7 @@ int main(void)
     test_reproducibility(0.0);
     test_reproducibility(0.5);
     test_noisy_acceptance();
+    test_shared_noise();
     test_rounding();
     test_wolff();
     test_save_load();

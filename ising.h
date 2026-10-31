@@ -5,6 +5,11 @@
 
 #define ISING_MAX_L 512
 
+typedef enum {
+    NOISE_INDEPENDENT,
+    NOISE_SHARED_SWEEP
+} NoiseMode;
+
 typedef struct {
     int L;
     int n_spins;
@@ -23,7 +28,7 @@ double ising_noisy_acceptance(int delta_energy, double beta, double sigma);
 /* lambda = 0 disattiva l'arrotondamento. */
 double ising_rounded_energy(int delta_energy, double lambda);
 int ising_metropolis_sweep(IsingLattice *lattice, double beta, double sigma,
-                           double lambda, Pcg32 *rng);
+                           double lambda, NoiseMode noise_mode, Pcg32 *rng);
 int ising_wolff_update(IsingLattice *lattice, double probability, Pcg32 *rng,
                        int *cluster, int *in_cluster);
 int ising_save_configuration(const char *filename, const IsingLattice *lattice,

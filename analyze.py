@@ -50,7 +50,7 @@ def read_header(filename):
 
 def read_perturbation_header(filename):
     # Conserva la descrizione della dinamica nei risultati dell'analisi.
-    keys = ("sigma", "lambda", "q4", "q8", "q12", "u", "v")
+    keys = ("sigma", "lambda", "noise_mode", "q4", "q8", "q12", "u", "v")
     lines = []
     open_file = gzip.open if str(filename).endswith(".gz") else open
     with open_file(filename, "rt", encoding="utf-8") as file:

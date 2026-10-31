@@ -25,6 +25,7 @@ class CampaignTests(unittest.TestCase):
         self.conf = self.root / "tiny.conf"
         self.settings = '''ALGORITHM=metropolis
 SIGMA=5
+NOISE_MODE=shared_sweep
 N_THERM=100
 N_SWEEPS=1024
 MEASURE_EVERY=1
@@ -52,6 +53,9 @@ REFERENCE=""
         rows = list(csv.DictReader((batch / "runs.csv").read_text().splitlines()))
         self.assertEqual([r["seed"] for r in rows], ["100", "101", "102"])
         self.assertTrue(all(r["status"] == "OK" for r in rows))
+        for row in rows:
+            self.assertIn("noise_mode = shared_sweep", Path(row["input_file"]).read_text())
+            self.assertIn("# noise_mode = shared_sweep", Path(row["data_file"]).read_text())
         self.assertLess(run.stdout.index("START L6"), run.stdout.index("START L4"))
         self.assertEqual((batch / "campaign.conf").read_text(), self.settings)
         # Editing the source config cannot change an existing batch's analysis.
@@ -59,10 +63,13 @@ REFERENCE=""
         result = self.run_script("analyse.sh", batch)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(len(list((batch / "results").glob("*_blocks.txt"))), 3)
+        for blocks in (batch / "results").glob("*_blocks.txt"):
+            self.assertIn("# noise_mode = shared_sweep", blocks.read_text())
         self.assertTrue((batch / "u_vs_rxi.png").is_file())
         # A clean Wolff campaign uses the same interface.
         self.conf.write_text(self.settings.replace("metropolis", "wolff")
                              .replace("SIGMA=5", "SIGMA=0")
+                             .replace("NOISE_MODE=shared_sweep", "NOISE_MODE=independent")
                              .replace("BASE_SEED=100", "BASE_SEED=200"))
         wolff = self.run_script("simulate.sh", self.conf)
         self.assertEqual(wolff.returncode, 0, wolff.stdout + wolff.stderr)
@@ -78,6 +85,7 @@ REFERENCE=""
             (self.settings.replace('"4 0.38 0.39"', '"4 0.38 0.38000000001"'), "filename collision"),
             (self.settings.replace("MAX_JOBS=2", "MAX_JOBS=0"), "MAX_JOBS"),
             (self.settings.replace("metropolis", "wolff"), "Wolff requires"),
+            (self.settings.replace("shared_sweep", "unknown"), "NOISE_MODE"),
         ):
             self.conf.write_text(settings)
             result = self.run_script("simulate.sh", self.conf)

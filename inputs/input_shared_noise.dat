@@ -1,0 +1,13 @@
+L = 8
+beta = 0.23
+n_therm = 1000
+n_sweeps = 10000
+measure_every = 10
+seed = 820000001
+start = random
+algorithm = metropolis
+config_file = data/shared_noise_config.dat
+data_file = data/shared_noise_data.dat
+sigma = 2
+lambda = 0
+noise_mode = shared_sweep
