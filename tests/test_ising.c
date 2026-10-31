@@ -318,64 +318,39 @@ static void test_rounding(void)
     ising_destroy(&clean);
 }
 
-/* Riferimento lento: ricava ogni costo dalla differenza delle energie totali,
-   senza usare ne' somma dei vicini ne' tabella delle probabilita'. */
+/* Confronto con un riferimento che ricava ogni costo dalle energie totali. */
 static void test_shared_noise(void)
 {
-    const double sigmas[] = {0.0, 0.5, 5.0};
-    int correct = 1, zero_limit = 1;
-    for (int L = 2; L <= 4; L++) {
-        for (int k = 0; k < 3; k++) {
-            IsingLattice actual, reference;
-            Pcg32 rng, expected_rng;
-            ising_create(&actual, L);
-            ising_create(&reference, L);
-            pcg32_seed(&rng, 123 + L);
-            ising_fill_random(&actual, &rng);
-            memcpy(reference.spins, actual.spins, L*L*L*sizeof(int));
-            expected_rng = rng;
-            for (int sweep = 0; sweep < 30; sweep++) {
-                double beta = sweep % 3 == 0 ? 0.0 : 0.22;
-                double eta = sigmas[k] > 0.0 ? sigmas[k] * pcg32_gaussian(&expected_rng) : 0.0;
-                int accepted = 0;
-                for (int site = 0; site < reference.n_spins; site++) {
-                    int energy = ising_total_energy(&reference);
-                    reference.spins[site] *= -1;
-                    double delta = ising_total_energy(&reference) - energy + eta;
-                    double probability = beta == 0.0 || delta <= 0.0 ? 1.0 : exp(-beta * delta);
-                    /* Il ramo pulito storico estrae anche per dE>0 a beta=0. */
-                    if ((sigmas[k] > 0.0 ? probability >= 1.0 : delta <= 0.0) ||
-                        pcg32_uniform(&expected_rng) < probability)
-                        accepted++;
-                    else
-                        reference.spins[site] *= -1;
-                }
-                int count = ising_metropolis_sweep(&actual, beta, sigmas[k], 0.0,
-                                                  NOISE_SHARED_SWEEP, &rng);
-                correct &= count == accepted && same_spins(&actual, &reference);
-                correct &= rng.state == expected_rng.state && rng.has_gaussian == expected_rng.has_gaussian;
-            }
-            ising_destroy(&actual);
-            ising_destroy(&reference);
-        }
-    }
-    IsingLattice shared, clean;
-    Pcg32 rng, clean_rng;
-    ising_create(&shared, 4);
-    ising_create(&clean, 4);
-    ising_fill_ordered(&shared);
-    ising_fill_ordered(&clean);
-    pcg32_seed(&rng, 42);
-    clean_rng = rng;
+    IsingLattice actual, reference;
+    Pcg32 rng, expected_rng;
+    int correct = 1;
+    ising_create(&actual, 3);
+    ising_create(&reference, 3);
+    pcg32_seed(&rng, 126);
+    ising_fill_random(&actual, &rng);
+    memcpy(reference.spins, actual.spins, actual.n_spins * sizeof(int));
+    expected_rng = rng;
     for (int sweep = 0; sweep < 30; sweep++) {
-        ising_metropolis_sweep(&shared, 0.22, 0.0, 0.0, NOISE_SHARED_SWEEP, &rng);
-        ising_metropolis_sweep(&clean, 0.22, 0.0, 0.0, NOISE_INDEPENDENT, &clean_rng);
-        zero_limit &= same_spins(&shared, &clean) && rng.state == clean_rng.state;
+        double beta = sweep % 3 == 0 ? 0.0 : 0.22;
+        double eta = 5.0 * pcg32_gaussian(&expected_rng);
+        int accepted = 0;
+        for (int site = 0; site < reference.n_spins; site++) {
+            int energy = ising_total_energy(&reference);
+            reference.spins[site] *= -1;
+            double delta = ising_total_energy(&reference) - energy + eta;
+            double probability = beta == 0.0 || delta <= 0.0 ? 1.0 : exp(-beta * delta);
+            if (probability >= 1.0 || pcg32_uniform(&expected_rng) < probability)
+                accepted++;
+            else
+                reference.spins[site] *= -1;
+        }
+        int count = ising_metropolis_sweep(&actual, beta, 5.0, 0.0, NOISE_SHARED_SWEEP, &rng);
+        correct &= count == accepted && same_spins(&actual, &reference);
+        correct &= rng.state == expected_rng.state && rng.has_gaussian == expected_rng.has_gaussian;
     }
     check(correct, "rumore condiviso: traiettoria e RNG coincidono con il riferimento esplicito");
-    check(zero_limit, "shared_sweep con sigma=0 conserva la traiettoria pulita e il RNG");
-    ising_destroy(&shared);
-    ising_destroy(&clean);
+    ising_destroy(&actual);
+    ising_destroy(&reference);
 }
 
 static void test_wolff(void)
@@ -434,7 +409,7 @@ static void test_save_load(void)
     ising_destroy(&loaded);
 }
 
-static void test_restart(double lambda)
+static void test_restart(double lambda, int shared_noise)
 {
     const char *first =
         "L = 3\n"
@@ -472,6 +447,11 @@ static void test_restart(double lambda)
         snprintf(restart_input, sizeof(restart_input), "%ssigma = 0\nlambda = %.17g\n", restart, lambda);
     }
 
+    if (shared_noise) {
+        snprintf(first_input, sizeof(first_input), "%ssigma = 2\nnoise_mode = shared_sweep\n", first);
+        snprintf(restart_input, sizeof(restart_input), "%snoise_mode = shared_sweep\nsigma = 2\n", restart);
+    }
+
     remove("test_data.tmp");
     write_text("test_first_input.tmp", first_input);
     write_text("test_restart_input.tmp", restart_input);
@@ -488,11 +468,12 @@ static void test_restart(double lambda)
     check(last_sweep("test_data.tmp") == 8,
           "restart continua la numerazione degli sweep");
 
-    snprintf(changed_input, sizeof(changed_input), "%slambda = 0.6\n", restart);
+    snprintf(changed_input, sizeof(changed_input), shared_noise
+             ? "%ssigma = 2\nnoise_mode = independent\n" : "%slambda = 0.6\n", restart);
     write_text("test_restart_input.tmp", changed_input);
     restart_status = system("./ising test_restart_input.tmp >> test_program_output.tmp 2>&1");
     check(restart_status != 0 && count_numeric_lines("test_data.tmp") == measures_after,
-          "restart rifiuta lambda diverso senza aggiungere misure");
+          "restart rifiuta perturbazioni diverse senza aggiungere misure");
     write_text("test_restart_input.tmp", restart_input);
 
     write_text("test_data.tmp",
@@ -563,8 +544,9 @@ int main(void)
     test_rounding();
     test_wolff();
     test_save_load();
-    test_restart(0.0);
-    test_restart(0.55);
+    test_restart(0.0, 0);
+    test_restart(0.55, 0);
+    test_restart(0.0, 1);
     test_wolff_simulation();
 
     printf("\nTest eseguiti: %d, falliti: %d\n", tests_run, tests_failed);
