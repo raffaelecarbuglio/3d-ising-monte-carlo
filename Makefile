@@ -26,7 +26,7 @@ test-z2: tests/test_z2
 test-analysis:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_*.py' -v
 main.o: main.c input.h ising.h rng.h
-input.o: input.c input.h
+input.o: input.c input.h ising.h rng.h
 ising.o: ising.c ising.h rng.h
 rng.o: rng.c rng.h
 tests/test_ising.o: tests/test_ising.c ising.h rng.h

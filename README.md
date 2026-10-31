@@ -30,6 +30,13 @@ Edit [inputs/input_example.dat](inputs/input_example.dat) to set lattice size, t
 
 For rounding, try `sigma = 0` and `lambda = 0.55`. The four families at strength `1/m = 1/2` use lambda `0.55, 0.60, 0.40, 0.45`. Keep lambda fixed while scanning beta; locate the shifted transition before production runs. Outputs record lambda and the rounded costs and ratios. A restart into the same data file requires the same sigma and lambda. `run_metropolis.sh` and `cluster/prepare.sh` accept `LAMBDA=...` (default zero), alongside `SIGMA=...`.
 
+For one Gaussian draw shared by all sites per sweep, set `noise_mode = shared_sweep`
+(default: `independent`), or `NOISE_MODE=shared_sweep` in campaigns and launchers.
+Every thermalisation and production sweep uses a fresh `eta = sigma * G` and
+acceptance `min(1, exp(-beta * (delta_E + eta)))`; energy measurements use the original
+Hamiltonian. This mode requires Metropolis and `lambda = 0`. Data and analysis
+headers record the mode, which must match when appending a restart.
+
 ## Campaigns from a configuration file
 
 Edit [`campaigns/sigma5.conf`](campaigns/sigma5.conf), then launch from the project directory:

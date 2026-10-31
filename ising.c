@@ -173,9 +173,10 @@ double ising_rounded_energy(int delta_energy, double lambda)
 }
 
 int ising_metropolis_sweep(IsingLattice *lattice, double beta, double sigma,
-                           double lambda, Pcg32 *rng)
+                           double lambda, NoiseMode noise_mode, Pcg32 *rng)
 {
     double acceptance_probability[4];
+    double shared_probability[7];
     /* Cache per le simulazioni seriali; aggiornata se cambiano i parametri. */
     static double noisy_probability[7];
     static double cached_beta = -1.0, cached_sigma = -1.0;
@@ -190,7 +191,16 @@ int ising_metropolis_sweep(IsingLattice *lattice, double beta, double sigma,
         acceptance_probability[k] = exp(-beta * delta);
     }
 
-    if (sigma > 0.0 && (beta != cached_beta || sigma != cached_sigma)) {
+    if (sigma > 0.0 && noise_mode == NOISE_SHARED_SWEEP) {
+        /* Una sola estrazione per sweep, prima di visitare i siti.
+           Tutti i costi usano lo stesso eta, senza media sul rumore. */
+        double eta = sigma * pcg32_gaussian(rng);
+        for (int j = 0; j < 7; j++) {
+            double delta = 4 * (j - 3) + eta;
+            shared_probability[j] = beta == 0.0 || delta <= 0.0
+                                  ? 1.0 : exp(-beta * delta);
+        }
+    } else if (sigma > 0.0 && (beta != cached_beta || sigma != cached_sigma)) {
         for (int j = 0; j < 7; j++) {
             noisy_probability[j] = ising_noisy_acceptance(4 * (j - 3), beta, sigma);
         }
@@ -211,7 +221,9 @@ int ising_metropolis_sweep(IsingLattice *lattice, double beta, double sigma,
 
                 if (sigma > 0.0) {
                     /* Il rumore agisce su ogni tentativo, anche per delta E <= 0. */
-                    double probability = noisy_probability[delta_energy / 4 + 3];
+                    double probability = noise_mode == NOISE_SHARED_SWEEP
+                                       ? shared_probability[delta_energy / 4 + 3]
+                                       : noisy_probability[delta_energy / 4 + 3];
                     accept = probability >= 1.0 || pcg32_uniform(rng) < probability;
                 } else {
                     /* Metropolis pulito o con arrotondamento deterministico. */

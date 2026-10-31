@@ -1,6 +1,8 @@
 #ifndef INPUT_H
 #define INPUT_H
 
+#include "ising.h"
+
 #define INPUT_PATH_SIZE 512
 
 typedef enum {
@@ -19,6 +21,7 @@ typedef struct {
     double beta;
     double sigma;
     double lambda;
+    NoiseMode noise_mode;
     int n_therm;
     int n_sweeps;
     int measure_every;
@@ -32,5 +35,6 @@ typedef struct {
 int input_read(const char *filename, SimulationParameters *parameters);
 const char *start_mode_name(StartMode mode);
 const char *algorithm_name(Algorithm algorithm);
+const char *noise_mode_name(NoiseMode mode);
 
 #endif

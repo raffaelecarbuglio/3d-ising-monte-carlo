@@ -65,27 +65,50 @@ int input_read(const char *filename, SimulationParameters *parameters)
     /* Campi finali opzionali, in qualsiasi ordine. */
     parameters->sigma = 0.0;
     parameters->lambda = 0.0;
-    int seen_sigma = 0, seen_lambda = 0;
+    parameters->noise_mode = NOISE_INDEPENDENT;
+    int seen_sigma = 0, seen_lambda = 0, seen_noise_mode = 0;
     while (fscanf(file, " %c", &extra) == 1) {
         char name[32];
-        double value;
+        char value[64];
+        double number;
+        char trailing;
         ungetc(extra, file);
-        if (fscanf(file, " %31[^= \t\r\n] = %lf", name, &value) != 2) {
-            fprintf(stderr, "Errore: atteso sigma = valore oppure lambda = valore.\n");
+        if (fscanf(file, " %31[^= \t\r\n] = %63s", name, value) != 2) {
+            fprintf(stderr, "Errore: atteso sigma, lambda oppure noise_mode = valore.\n");
             fclose(file);
             return 0;
         }
-        if (strcmp(name, "sigma") == 0 && !seen_sigma) {
-            parameters->sigma = value;
+        if (strcmp(name, "noise_mode") == 0 && !seen_noise_mode) {
+            if (strcmp(value, "independent") == 0) {
+                parameters->noise_mode = NOISE_INDEPENDENT;
+            } else if (strcmp(value, "shared_sweep") == 0) {
+                parameters->noise_mode = NOISE_SHARED_SWEEP;
+            } else {
+                fprintf(stderr, "Errore: noise_mode deve essere independent oppure shared_sweep.\n");
+                fclose(file);
+                return 0;
+            }
+            seen_noise_mode = 1;
+        } else if (strcmp(name, "sigma") == 0 && !seen_sigma &&
+                   sscanf(value, "%lf%c", &number, &trailing) == 1) {
+            parameters->sigma = number;
             seen_sigma = 1;
-        } else if (strcmp(name, "lambda") == 0 && !seen_lambda) {
-            parameters->lambda = value;
+        } else if (strcmp(name, "lambda") == 0 && !seen_lambda &&
+                   sscanf(value, "%lf%c", &number, &trailing) == 1) {
+            parameters->lambda = number;
             seen_lambda = 1;
         } else {
             fprintf(stderr, "Errore: campo opzionale sconosciuto o ripetuto: %s.\n", name);
             fclose(file);
             return 0;
         }
+    }
+
+    if (parameters->noise_mode == NOISE_SHARED_SWEEP &&
+        (parameters->algorithm != ALGORITHM_METROPOLIS || parameters->lambda > 0.0)) {
+        fprintf(stderr, "Errore: shared_sweep richiede Metropolis e lambda = 0.\n");
+        fclose(file);
+        return 0;
     }
 
     if (!isfinite(parameters->lambda) || parameters->lambda < 0.0 ||
@@ -155,4 +178,9 @@ const char *algorithm_name(Algorithm algorithm)
         return "metropolis";
     }
     return "wolff";
+}
+
+const char *noise_mode_name(NoiseMode mode)
+{
+    return mode == NOISE_SHARED_SWEEP ? "shared_sweep" : "independent";
 }
