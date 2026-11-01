@@ -33,6 +33,16 @@ if [[ "$NOISE_MODE" == shared_sweep ]]; then
 fi
 [[ ${#BETA_GRID[@]} -gt 0 ]] || fail "BETA_GRID is empty."
 
+# Unlisted sizes use one chain. N_SWEEPS is the total per (L,beta).
+declare -A replicas_by_size=()
+for specification in ${REPLICAS_BY_L:-}; do
+    [[ "$specification" =~ ^([1-9][0-9]{0,3}):([1-9][0-9]{0,8})$ ]] || fail "Use REPLICAS_BY_L=\"48:2 64:4\"."
+    size=${BASH_REMATCH[1]}; count=${BASH_REMATCH[2]}
+    [[ -z ${replicas_by_size[$size]+x} ]] || fail "Repeated replica setting for L=$size."
+    (( N_SWEEPS % (count * MEASURE_EVERY) == 0 )) || fail "N_SWEEPS must be divisible by replicas * MEASURE_EVERY for L=$size."
+    replicas_by_size[$size]=$count
+done
+
 OUTPUT_DIR=${OUTPUT_DIR:-runs}
 mkdir -p "$OUTPUT_DIR"
 OUTPUT_DIR=$(realpath "$OUTPUT_DIR")
@@ -51,31 +61,36 @@ echo "Batch directory: $BATCH"
 
 # Prepare every input before starting any simulation.
 run_id=0
-declare -A seen
+declare -A seen seen_size
 for row in "${BETA_GRID[@]}"; do
     read -r -a values <<< "$row"
     L=${values[0]:-}
     # L^3 must fit the C simulator's signed integer site count.
     [[ "$L" =~ ^[1-9][0-9]{0,3}$ ]] && (( L >= 2 && L <= 1290 )) || fail "Invalid lattice size: $L."
     (( ${#values[@]} >= 2 )) || fail "Missing beta values for L=$L."
+    seen_size[$L]=1
+    replicas=${replicas_by_size[$L]:-1}
+    sweeps=$((N_SWEEPS / replicas))
     for beta in "${values[@]:1}"; do
         awk -v b="$beta" 'BEGIN { exit !(b ~ /^([0-9]+([.][0-9]*)?|[.][0-9]+)([eE][+-]?[0-9]+)?$/ && b+0 < 1e308) }' || fail "Invalid beta: $beta."
-        seed=$((BASE_SEED + run_id))
-        (( seed <= 2147483647 )) || fail "Seed range exceeds the C integer limit."
-        beta_name=$(printf '%.9f' "$beta" | tr '.' p)
-        name="L${L}_b${beta_name}"
-        [[ -z ${seen[$name]+x} ]] || fail "Repeated point or filename collision: $name."
-        seen[$name]=1
-        input="$BATCH/inputs/$name.in"
-        data="$BATCH/results/${name}_data.dat"
-        config="$BATCH/results/${name}_config.dat"
-        log="$BATCH/results/$name.log"
-        (( ${#config} <= 511 && ${#data} <= 511 )) || fail "Output path exceeds the C input format's 511-character limit."
-        cat > "$input" <<EOF
+        for (( replica=0; replica<replicas; replica++ )); do
+            seed=$((BASE_SEED + run_id))
+            (( seed <= 2147483647 )) || fail "Seed range exceeds the C integer limit."
+            beta_name=$(printf '%.9f' "$beta" | tr '.' p)
+            name="L${L}_b${beta_name}"
+            if (( replicas > 1 )); then name+="_r$replica"; fi
+            [[ -z ${seen[$name]+x} ]] || fail "Repeated point or filename collision: $name."
+            seen[$name]=1
+            input="$BATCH/inputs/$name.in"
+            data="$BATCH/results/${name}_data.dat"
+            config="$BATCH/results/${name}_config.dat"
+            log="$BATCH/results/$name.log"
+            (( ${#config} <= 511 && ${#data} <= 511 )) || fail "Output path exceeds the C input format's 511-character limit."
+            cat > "$input" <<EOF
 L = $L
 beta = $beta
 n_therm = $N_THERM
-n_sweeps = $N_SWEEPS
+n_sweeps = $sweeps
 measure_every = $MEASURE_EVERY
 seed = $seed
 start = random
@@ -86,9 +101,13 @@ sigma = $SIGMA
 lambda = $LAMBDA
 noise_mode = $NOISE_MODE
 EOF
-        printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,PENDING,\n' "$name" "$L" "$beta" "$seed" "$N_THERM" "$N_SWEEPS" "$MEASURE_EVERY" "$input" "$data" "$config" "$log" >> "$BATCH/runs.csv"
-        run_id=$((run_id + 1))
+            printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,PENDING,\n' "$name" "$L" "$beta" "$seed" "$N_THERM" "$sweeps" "$MEASURE_EVERY" "$input" "$data" "$config" "$log" >> "$BATCH/runs.csv"
+            run_id=$((run_id + 1))
+        done
     done
+done
+for size in "${!replicas_by_size[@]}"; do
+    [[ -n ${seen_size[$size]+x} ]] || fail "REPLICAS_BY_L contains L=$size, absent from BETA_GRID."
 done
 SEED_HISTORY=("${SEED_HISTORY[@]:-$ROOT}")
 python3 cluster/check_seeds.py "$BATCH/inputs" --against "${SEED_HISTORY[@]}"

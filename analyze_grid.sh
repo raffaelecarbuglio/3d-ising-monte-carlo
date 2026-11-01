@@ -131,6 +131,12 @@ for f in "${DATA_FILES[@]}"; do
         exit 1
     fi
     SEEN_DATA[$key]=1
+    if [[ "$name" =~ _r[0-9]+_data\.dat(\.gz)?$ ]]; then
+        prefix=${f%_r*}
+        [[ -f "${prefix}_r0_data.dat" || -f "${prefix}_r0_data.dat.gz" ]] || {
+            echo "ERROR: missing replica r0 for $name." >&2; exit 1;
+        }
+    fi
 done
 
 TMP_ANALYSIS=$(mktemp -d)
@@ -177,12 +183,22 @@ echo "Concurrent analyses: $ANALYSIS_JOBS (one thread each)"
 for index in "${!DATA_FILES[@]}"; do
     f="${DATA_FILES[$index]}"
     name=$(basename "$f")
+    files=("$f")
+    blocks_output=()
+    if [[ "$name" =~ _r[0-9]+_data\.dat(\.gz)?$ ]]; then
+        [[ "$name" =~ _r0_data\.dat(\.gz)?$ ]] || continue
+        prefix=${f%_r0_data.dat*}
+        shopt -s nullglob
+        files=("${prefix}"_r*_data.dat "${prefix}"_r*_data.dat.gz)
+        shopt -u nullglob
+        blocks_output=(--blocks-output "${prefix}_data_blocks.txt")
+    fi
     [[ "$name" =~ ^L([0-9]+)_ ]]
     L="${BASH_REMATCH[1]}"
     block="${BLOCK[$L]}"
     echo "Analyzing $name   L=$L   block_size=$block"
     printf '\n%s\nblock_size = %s\n' "$name" "$block" > "$TMP_ANALYSIS/$index.log"
-    python3 analyze.py "$f" \
+    python3 analyze.py "${files[@]}" "${blocks_output[@]}" \
         --block-size "$block" \
         --summary-output "$TMP_ANALYSIS/$index.summary" \
         >> "$TMP_ANALYSIS/$index.log" 2>&1 &

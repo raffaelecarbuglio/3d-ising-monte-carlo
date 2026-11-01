@@ -197,86 +197,42 @@ def calculate_block_sums(data, block_size):
     ))
 
 
+def observables_from_means(means, lattice_size):
+    """Convert moment means into observables, for one sample or many samples."""
+    energy, magnetization, abs_m, m2, m4, g_zero, g_min = means.T
+    if not np.isfinite(means).all():
+        raise ValueError("osservabili non finite")
+    if np.any(g_min <= 0):
+        raise ValueError("<g_min> deve essere positivo")
+    if np.any(g_zero < g_min):
+        raise ValueError("xi non valida: <g_zero>/<g_min> - 1 e' negativo")
+    if np.any(m2 <= 0):
+        raise ValueError("Binder non definito: <m^2> e' zero o negativo")
+    xi = np.sqrt(g_zero / g_min - 1) / (2 * np.sin(np.pi / lattice_size))
+    return dict(energy=-energy/3, magnetization=magnetization,
+                abs_magnetization=abs_m, binder=m4/m2**2,
+                susceptibility=lattice_size**3*m2, g_zero=g_zero, g_min=g_min,
+                xi=xi, r_xi=xi/lattice_size)
+
+
 def jackknife_from_block_sums(block_sums, lattice_size, block_size,
                              total_measurements, observables=None):
     number_of_blocks = len(block_sums)
     if number_of_blocks < 2:
         raise ValueError("servono almeno 2 blocchi completi per il jackknife")
-    used_measurements = number_of_blocks * block_size
-    excluded_measurements = total_measurements - used_measurements
-    (block_energy_sums, block_magnetization_sums, block_abs_magnetization_sums,
-     block_m2_sums, block_m4_sums, block_g_zero_sums, block_g_min_sums) = block_sums.T
-
-    total_energy_sum = np.sum(block_energy_sums)
-    total_abs_magnetization_sum = np.sum(block_abs_magnetization_sums)
-    total_m2_sum = np.sum(block_m2_sums)
-    total_m4_sum = np.sum(block_m4_sums)
-    total_g_zero_sum = np.sum(block_g_zero_sums)
-    total_g_min_sum = np.sum(block_g_min_sums)
+    used = number_of_blocks * block_size
+    totals = block_sums.sum(axis=0)
     if observables is None:
-        mean_m2 = total_m2_sum / used_measurements
-        if mean_m2 == 0.0:
-            raise ValueError("Binder non definito: <m^2> e' zero")
-        mean_g_zero = total_g_zero_sum / used_measurements
-        mean_g_min = total_g_min_sum / used_measurements
-        xi = calculate_xi([mean_g_zero], [mean_g_min], lattice_size)
-        observables = {
-            "energy": -total_energy_sum / used_measurements / 3.0,
-            "magnetization": np.sum(block_magnetization_sums) / used_measurements,
-            "abs_magnetization": total_abs_magnetization_sum / used_measurements,
-            "binder": (total_m4_sum / used_measurements) / mean_m2**2,
-            "susceptibility": lattice_size**3 * mean_m2,
-            "g_zero": mean_g_zero,
-            "g_min": mean_g_min,
-            "xi": xi,
-            "r_xi": xi / lattice_size,
-        }
-
-    remaining_measurements = used_measurements - block_size
-
-    # Ogni elemento contiene la media con un blocco escluso.
-    mean_energy = (
-        total_energy_sum - block_energy_sums
-    ) / remaining_measurements
-    mean_abs_magnetization = (
-        total_abs_magnetization_sum - block_abs_magnetization_sums
-    ) / remaining_measurements
-    mean_m2 = (total_m2_sum - block_m2_sums) / remaining_measurements
-    mean_m4 = (total_m4_sum - block_m4_sums) / remaining_measurements
-    mean_g_zero = (
-        total_g_zero_sum - block_g_zero_sums
-    ) / remaining_measurements
-    mean_g_min = (
-        total_g_min_sum - block_g_min_sums
-    ) / remaining_measurements
-
-    if np.any(mean_g_min <= 0.0):
-        raise ValueError(
-            "campione jackknife non valido: <g_min> deve essere positivo"
-        )
-
-    radicand = mean_g_zero / mean_g_min - 1.0
-    if np.any(radicand < 0.0):
-        raise ValueError(
-            "campione jackknife non valido: <g_zero>/<g_min> - 1 e' negativo; "
-            "la statistica puo' essere insufficiente"
-        )
-    if np.any(mean_m2 == 0.0):
-        raise ValueError(
-            "campione jackknife non valido: Binder non definito, <m^2> e' zero"
-        )
-
-    xi = np.sqrt(radicand) / (2.0 * math.sin(math.pi / lattice_size))
-    errors = {
-        "energy": jackknife_error(-mean_energy / 3.0),
-        "abs_magnetization": jackknife_error(mean_abs_magnetization),
-        "binder": jackknife_error(mean_m4 / mean_m2**2),
-        "susceptibility": jackknife_error(lattice_size**3 * mean_m2),
-        "xi": jackknife_error(xi),
-        "r_xi": jackknife_error(xi / lattice_size),
-    }
-
-    return observables, errors, number_of_blocks, used_measurements, excluded_measurements
+        observables = observables_from_means(totals / used, lattice_size)
+    # Each row omits one block; reuse the same observable formulas.
+    means = (totals - block_sums) / (used - block_size)
+    try:
+        samples = observables_from_means(means, lattice_size)
+    except ValueError as error:
+        raise ValueError(f"campione jackknife non valido: {error}") from error
+    errors = {key: jackknife_error(samples[key]) for key in
+              ("energy", "abs_magnetization", "binder", "susceptibility", "xi", "r_xi")}
+    return observables, errors, number_of_blocks, used, total_measurements-used
 
 
 def block_jackknife(data, lattice_size, beta, block_size):
@@ -292,7 +248,7 @@ def block_jackknife(data, lattice_size, beta, block_size):
     )
 
 
-def analyze_streaming(filename, block_size, chunk_rows=100_000):
+def read_block_sums(filename, block_size, chunk_rows=100_000):
     if block_size <= 0:
         raise ValueError("block-size deve essere un intero positivo")
     if chunk_rows <= 0:
@@ -314,9 +270,56 @@ def analyze_streaming(filename, block_size, chunk_rows=100_000):
         raise ValueError("servono almeno 2 blocchi completi per il jackknife")
     block_sums = np.concatenate(sums)
     del sums
+    return lattice_size, beta, total, block_sums
+
+
+def analyze_streaming(filename, block_size, chunk_rows=100_000):
+    lattice_size, beta, total, block_sums = read_block_sums(filename, block_size, chunk_rows)
     results = jackknife_from_block_sums(block_sums, lattice_size, block_size, total)
     averages = block_sums[:, [5, 6, 3, 4]] / block_size
     return lattice_size, beta, total, results, averages
+
+
+def analyze_replicas(filenames, block_size):
+    """Pool complete blocks, never joining a block across two chains."""
+    identity = read_header(filenames[0])
+    perturbation = read_perturbation_header(filenames[0])
+    sums, total, seeds, dynamics = [], 0, set(), None
+    for filename in filenames:
+        if read_header(filename) != identity or read_perturbation_header(filename) != perturbation:
+            raise ValueError("replicas must have the same L, beta and perturbation")
+        opener = gzip.open if str(filename).endswith(".gz") else open
+        with opener(filename, "rt") as file:
+            header = {}
+            for line in file:
+                if not line.startswith("#"):
+                    break
+                if " = " in line:
+                    key, value = line[2:].strip().split(" = ", 1)
+                    header[key] = value
+        current = (header.get("algorithm"), header.get("measure_every"))
+        seed = header.get("seed")
+        if seed is None or seed in seeds or (dynamics is not None and current != dynamics):
+            raise ValueError("replicas need distinct seeds and matching dynamics/sampling")
+        seeds.add(seed)
+        dynamics = current
+        _, _, n, blocks = read_block_sums(filename, block_size)
+        if len(blocks) < 2:
+            raise ValueError("each replica needs at least two complete blocks")
+        sums.append(blocks)
+        total += n
+    means = np.concatenate(sums) / block_size
+    L, beta = identity
+
+    central = observables_from_means(means.mean(0), L)
+    rng = np.random.default_rng(20261101)
+    # Same indices for every moment preserve the U/Rxi covariance.
+    draws = np.array([means[rng.integers(len(means), size=len(means))].mean(0)
+                      for _ in range(3000)])
+    errors = {key: np.std(value, ddof=1) for key, value in observables_from_means(draws, L).items()}
+    used = len(means) * block_size
+    results = central, errors, len(means), used, total-used
+    return L, beta, total, results, means[:, [5, 6, 3, 4]]
 
 
 def calculate_block_averages(data, block_size):
@@ -412,7 +415,7 @@ def save_summary(filename, lattice_size, beta, observables, errors, perturbation
 
 def main():
     parser = argparse.ArgumentParser(description="Analizza le misure del modello di Ising")
-    parser.add_argument("filename", help="file delle misure prodotto dal simulatore")
+    parser.add_argument("filename", nargs="+", help="file delle misure prodotto dal simulatore")
     parser.add_argument(
         "--summary-output",
         help="aggiunge i risultati al file di riepilogo indicato",
@@ -433,15 +436,19 @@ def main():
     arguments = parser.parse_args()
 
     try:
-        perturbation_header = read_perturbation_header(arguments.filename)
-        lattice_size, beta, total, results, block_averages = analyze_streaming(
-            arguments.filename, arguments.block_size
-        )
+        filenames = arguments.filename
+        perturbation_header = read_perturbation_header(filenames[0])
+        if len(filenames) > 1:
+            perturbation_header += (f"# replicas = {len(filenames)}\n"
+                                    "# errors = paired block bootstrap, 3000 resamples, seed 20261101\n")
+            lattice_size, beta, total, results, block_averages = analyze_replicas(filenames, arguments.block_size)
+        else:
+            lattice_size, beta, total, results, block_averages = analyze_streaming(filenames[0], arguments.block_size)
         observables, errors, blocks, used, excluded = results
         blocks_output = (
             arguments.blocks_output
             if arguments.blocks_output is not None
-            else default_blocks_filename(arguments.filename)
+            else default_blocks_filename(filenames[0])
         )
         save_blocks(
             blocks_output,
@@ -466,7 +473,7 @@ def main():
     print(perturbation_header, end="")
     print()
     print_results(
-        arguments.filename,
+        ", ".join(filenames),
         lattice_size,
         beta,
         total,

@@ -10,6 +10,7 @@ import numpy as np
 
 from analyze import (
     analyze_streaming,
+    analyze_replicas,
     block_jackknife,
     calculate_block_averages,
     calculate_binder,
@@ -65,6 +66,29 @@ def brute_force_block_jackknife(data, lattice_size, beta, block_size):
 
 
 class AnalysisTests(unittest.TestCase):
+    def test_replica_blocks_do_not_cross_chain_boundaries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            files = []
+            expected = []
+            for replica, moment in enumerate([8, 24]):
+                path = Path(directory) / f"r{replica}.dat"
+                data = np.array([[i, -64, moment, 1] for i in range(6)] + [[6, -64, 64, 1]])
+                np.savetxt(path, data, header=f"L = 4\nbeta = 0.2\nseed = {replica}")
+                files.append(path)
+                _, _, normalized = read_data_file(path)
+                expected.extend(calculate_block_averages(normalized[:6], 3))
+            L, beta, total, result, averages = analyze_replicas(files, 3)
+            np.testing.assert_allclose(averages, expected)
+            obs, errors, nblocks, used, excluded = result
+            self.assertEqual((total, nblocks, used, excluded), (14, 4, 12, 2))
+            self.assertAlmostEqual(obs["binder"], 1.64)
+            self.assertGreater(errors["binder"], 0)
+            with self.assertRaisesRegex(ValueError, "distinct seeds"):
+                analyze_replicas([files[0], files[0]], 3)
+            files[1].write_text(files[1].read_text().replace("beta = 0.2", "beta = 0.3"))
+            with self.assertRaisesRegex(ValueError, "same L, beta"):
+                analyze_replicas(files, 3)
+
     def test_streaming_matches_full_array_and_brute_force(self):
         rng = np.random.default_rng(17)
         count = 67

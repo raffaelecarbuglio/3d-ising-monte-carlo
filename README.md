@@ -51,6 +51,16 @@ status table there. Each `BETA_GRID` row contains `L` followed by explicit beta 
 Seeds are `BASE_SEED`, `BASE_SEED+1`, etc., in grid order; larger lattices launch first,
 in groups of up to `MAX_JOBS`. An unsuccessful group stops the campaign before the next group.
 
+Optionally set `REPLICAS_BY_L="48:2 64:4"` to split only those sizes into
+independent chains; unlisted sizes use one. `N_SWEEPS` is the total production
+per `(L,beta)`, divided equally across replicas, and must be divisible by
+`replicas * MEASURE_EVERY`. Each chain gets the full `N_THERM`, a unique seed,
+and `_r0`, `_r1`, ... output names. `MAX_JOBS` limits all running chains together.
+Analysis pools complete blocks formed separately within each chain and produces
+one point per `(L,beta)` using 3,000 paired block-bootstrap resamples (seed 20261101).
+Each replica needs at least two complete blocks; check its thermalisation and blocking
+plateau before choosing production lengths. Single-chain analysis retains its existing method.
+
 Choose an unused `BASE_SEED` before each campaign. The launcher rejects reuse against
 saved `.in` files in `SEED_HISTORY` (by default this project); add other directories if
 older inputs live elsewhere. It cannot check missing inputs or reserve seeds against
