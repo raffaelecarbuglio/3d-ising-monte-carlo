@@ -292,7 +292,7 @@ def block_jackknife(data, lattice_size, beta, block_size):
     )
 
 
-def analyze_streaming(filename, block_size, chunk_rows=100_000):
+def read_block_sums(filename, block_size, chunk_rows=100_000):
     if block_size <= 0:
         raise ValueError("block-size deve essere un intero positivo")
     if chunk_rows <= 0:
@@ -314,9 +314,64 @@ def analyze_streaming(filename, block_size, chunk_rows=100_000):
         raise ValueError("servono almeno 2 blocchi completi per il jackknife")
     block_sums = np.concatenate(sums)
     del sums
+    return lattice_size, beta, total, block_sums
+
+
+def analyze_streaming(filename, block_size, chunk_rows=100_000):
+    lattice_size, beta, total, block_sums = read_block_sums(filename, block_size, chunk_rows)
     results = jackknife_from_block_sums(block_sums, lattice_size, block_size, total)
     averages = block_sums[:, [5, 6, 3, 4]] / block_size
     return lattice_size, beta, total, results, averages
+
+
+def analyze_replicas(filenames, block_size):
+    """Pool complete blocks, never joining a block across two chains."""
+    identity = read_header(filenames[0])
+    perturbation = read_perturbation_header(filenames[0])
+    sums, total, seeds, dynamics = [], 0, set(), None
+    for filename in filenames:
+        if read_header(filename) != identity or read_perturbation_header(filename) != perturbation:
+            raise ValueError("replicas must have the same L, beta and perturbation")
+        opener = gzip.open if str(filename).endswith(".gz") else open
+        with opener(filename, "rt") as file:
+            header = {}
+            for line in file:
+                if not line.startswith("#"):
+                    break
+                if " = " in line:
+                    key, value = line[2:].strip().split(" = ", 1)
+                    header[key] = value
+        current = (header.get("algorithm"), header.get("measure_every"))
+        seed = header.get("seed")
+        if seed is None or seed in seeds or (dynamics is not None and current != dynamics):
+            raise ValueError("replicas need distinct seeds and matching dynamics/sampling")
+        seeds.add(seed); dynamics = current
+        _, _, n, blocks = read_block_sums(filename, block_size)
+        if len(blocks) < 2:
+            raise ValueError("each replica needs at least two complete blocks")
+        sums.append(blocks); total += n
+    means = np.concatenate(sums) / block_size
+    L, beta = identity
+
+    def observables(q):
+        e, m, a, m2, m4, g0, gp = q.T
+        if (not np.isfinite(q).all() or np.any(m2 <= 0) or np.any(gp <= 0)
+                or np.any(g0 < gp)):
+            raise ValueError("invalid bootstrap observables; increase statistics")
+        xi = np.sqrt(g0 / gp - 1) / (2 * np.sin(np.pi / L))
+        return dict(energy=-e/3, magnetization=m, abs_magnetization=a,
+                    binder=m4/m2**2, susceptibility=L**3*m2,
+                    g_zero=g0, g_min=gp, xi=xi, r_xi=xi/L)
+
+    central = observables(means.mean(0))
+    rng = np.random.default_rng(20261101)
+    # Same indices for every moment preserve the U/Rxi covariance.
+    draws = np.array([means[rng.integers(len(means), size=len(means))].mean(0)
+                      for _ in range(3000)])
+    errors = {key: np.std(value, ddof=1) for key, value in observables(draws).items()}
+    used = len(means) * block_size
+    results = central, errors, len(means), used, total-used
+    return L, beta, total, results, means[:, [5, 6, 3, 4]]
 
 
 def calculate_block_averages(data, block_size):
@@ -412,7 +467,7 @@ def save_summary(filename, lattice_size, beta, observables, errors, perturbation
 
 def main():
     parser = argparse.ArgumentParser(description="Analizza le misure del modello di Ising")
-    parser.add_argument("filename", help="file delle misure prodotto dal simulatore")
+    parser.add_argument("filename", nargs="+", help="file delle misure prodotto dal simulatore")
     parser.add_argument(
         "--summary-output",
         help="aggiunge i risultati al file di riepilogo indicato",
@@ -433,15 +488,19 @@ def main():
     arguments = parser.parse_args()
 
     try:
-        perturbation_header = read_perturbation_header(arguments.filename)
-        lattice_size, beta, total, results, block_averages = analyze_streaming(
-            arguments.filename, arguments.block_size
-        )
+        filenames = arguments.filename
+        perturbation_header = read_perturbation_header(filenames[0])
+        if len(filenames) > 1:
+            perturbation_header += (f"# replicas = {len(filenames)}\n"
+                                    "# errors = paired block bootstrap, 3000 resamples, seed 20261101\n")
+            lattice_size, beta, total, results, block_averages = analyze_replicas(filenames, arguments.block_size)
+        else:
+            lattice_size, beta, total, results, block_averages = analyze_streaming(filenames[0], arguments.block_size)
         observables, errors, blocks, used, excluded = results
         blocks_output = (
             arguments.blocks_output
             if arguments.blocks_output is not None
-            else default_blocks_filename(arguments.filename)
+            else default_blocks_filename(filenames[0])
         )
         save_blocks(
             blocks_output,
@@ -466,7 +525,7 @@ def main():
     print(perturbation_header, end="")
     print()
     print_results(
-        arguments.filename,
+        ", ".join(filenames),
         lattice_size,
         beta,
         total,

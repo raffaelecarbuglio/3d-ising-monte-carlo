@@ -69,6 +69,28 @@ REFERENCE=""
         data = list(self.batches()[-1].glob("results/*_data.dat"))
         self.assertEqual(len(data), 3)
 
+    def test_selected_sizes_split_and_pool(self):
+        self.conf.write_text(self.settings + 'REPLICAS_BY_L="6:2"\n')
+        result = self.run_script("simulate.sh", self.conf)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        batch = self.batches()[0]
+        rows = list(csv.DictReader((batch / "runs.csv").open()))
+        self.assertEqual([r["seed"] for r in rows], ["100", "101", "102", "103"])
+        self.assertEqual([int(r["n_sweeps"]) for r in rows], [1024, 1024, 512, 512])
+        self.assertTrue(all(r["n_therm"] == "100" for r in rows))
+        self.assertEqual([r["name"].split("_")[-1] for r in rows[2:]], ["r0", "r1"])
+        result = self.run_script("analyse.sh", batch)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        points = [line for line in (batch / "scaling_summary.txt").read_text().splitlines()
+                  if line and not line.startswith("#")]
+        self.assertEqual(len(points), 3)
+        pooled = next((batch / "results").glob("L6*_blocks.txt"))
+        self.assertIn("# replicas = 2", pooled.read_text())
+        self.assertIn("paired block bootstrap", pooled.read_text())
+        # A missing replica must not silently reduce the requested statistics.
+        (batch / "results" / (rows[-1]["name"] + "_data.dat")).unlink()
+        self.assertNotEqual(self.run_script("analyse.sh", batch).returncode, 0)
+
     def test_preflight_rejects_reused_seeds_and_colliding_points(self):
         history = self.root / "old"
         history.mkdir()
@@ -77,6 +99,10 @@ REFERENCE=""
             (self.settings, "Repeated seed 100"),
             (self.settings.replace('"4 0.38 0.39"', '"4 0.38 0.38000000001"'), "filename collision"),
             (self.settings.replace("MAX_JOBS=2", "MAX_JOBS=0"), "MAX_JOBS"),
+            (self.settings + 'REPLICAS_BY_L="6:3"\n', "divisible"),
+            (self.settings + 'REPLICAS_BY_L="6:0"\n', "REPLICAS_BY_L"),
+            (self.settings + 'REPLICAS_BY_L="8:2"\n', "absent from BETA_GRID"),
+            (self.settings + 'REPLICAS_BY_L="6:2 6:4"\n', "Repeated replica"),
             (self.settings.replace("metropolis", "wolff"), "Wolff requires"),
         ):
             self.conf.write_text(settings)

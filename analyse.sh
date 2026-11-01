@@ -15,6 +15,14 @@ if [[ ! -f "$BATCH/runs.csv" ]] || ! awk -F, 'NR>1 {n++; if ($12!="OK") bad=1} E
     echo "ERROR: runs.csv must report OK for every simulation." >&2
     exit 1
 fi
+# Resolve saved filenames locally (the batch may have been copied from another PC).
+while IFS=, read -r name L beta seed therm sweeps every input data rest; do
+    data="$BATCH/results/$(basename "$data")"
+    if [[ ! -f "$data" && ! -f "$data.gz" ]]; then
+        echo "ERROR: missing measurements for $name." >&2
+        exit 1
+    fi
+done < <(tail -n +2 "$BATCH/runs.csv")
 read -r -a blocks <<< "$BLOCK_SIZES"
 ANALYSIS_JOBS=${ANALYSIS_JOBS:-8} bash analyze_grid.sh "$BATCH" "${blocks[@]}"
 
