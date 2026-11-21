@@ -1,5 +1,6 @@
 """Exercise campaign orchestration with real tiny simulations and saved settings."""
 import csv
+import json
 import os
 from pathlib import Path
 import shutil
@@ -16,12 +17,13 @@ class CampaignTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="campaign_")
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        for name in ("simulate.sh", "analyse.sh", "analyze_grid.sh", "analyze.py",
+        for name in ("simulate.sh", "submit_campaign.sh", "analyse.sh", "analyze_grid.sh", "analyze.py",
                      "plot_u_vs_rxi.py", "Makefile", "main.c", "input.c", "input.h",
                      "ising.c", "ising.h", "rng.c", "rng.h"):
             shutil.copy(PROJECT / name, self.root / name)
         (self.root / "cluster").mkdir()
         shutil.copy(PROJECT / "cluster/check_seeds.py", self.root / "cluster")
+        shutil.copy(PROJECT / "cluster/campaign_task.sh", self.root / "cluster")
         self.conf = self.root / "tiny.conf"
         self.settings = '''ALGORITHM=metropolis
 SIGMA=5
@@ -37,10 +39,12 @@ REFERENCE=""
 '''
         self.conf.write_text(self.settings)
 
-    def run_script(self, script, argument):
-        return subprocess.run(["bash", str(self.root / script), str(argument)],
+    def run_script(self, script, *arguments, env=None):
+        environment = dict(os.environ, MPLBACKEND="Agg")
+        environment.update(env or {})
+        return subprocess.run(["bash", str(self.root / script), *map(str, arguments)],
                               cwd=self.root.parent, capture_output=True, text=True,
-                              env=dict(os.environ, MPLBACKEND="Agg"), timeout=60)
+                              env=environment, timeout=60)
 
     def batches(self):
         return sorted((self.root / "runs").glob("tiny_*"))
@@ -90,6 +94,73 @@ REFERENCE=""
         # A missing replica must not silently reduce the requested statistics.
         (batch / "results" / (rows[-1]["name"] + "_data.dat")).unlink()
         self.assertNotEqual(self.run_script("analyse.sh", batch).returncode, 0)
+
+    def test_slurm_arrays_share_results_and_retry_only_incomplete_replicas(self):
+        subprocess.run(["make", "ising"], cwd=self.root, capture_output=True, check=True)
+        self.conf.write_text(self.settings + 'REPLICAS_BY_L="6:2"\n'
+                             'SLURM_TIME_BY_L="6:04:00:00"\nSLURM_MAX_RUNNING=2\n')
+        tools = self.root / "stub_bin"
+        tools.mkdir()
+        sbatch = tools / "sbatch"
+        sbatch.write_text(r"""#!/usr/bin/env python3
+import json, os, sys
+with open(os.environ["SUBMISSIONS"], "a") as record:
+    record.write(json.dumps(sys.argv[1:]) + "\n")
+print(1234)
+""")
+        sbatch.chmod(0o755)
+        squeue = tools / "squeue"
+        squeue.write_text('#!/bin/bash\nprintf "%s" "${ACTIVE_JOB:-}"\n')
+        squeue.chmod(0o755)
+        submissions = self.root / "submissions.jsonl"
+        env = dict(PATH=f"{tools}{os.pathsep}{os.environ['PATH']}",
+                   SUBMISSIONS=str(submissions), USER="campaign-test")
+
+        submission = self.run_script("submit_campaign.sh", self.conf, env=env)
+        self.assertEqual(submission.returncode, 0, submission.stdout + submission.stderr)
+        batch, = self.batches()
+        arrays = [json.loads(line) for line in submissions.read_text().splitlines()]
+        self.assertEqual(len(arrays), 2)
+        for args in arrays:
+            self.assertIn(f"--chdir={batch}", args)
+            self.assertIn("--partition=levante,mefisto,zefiro", args)
+            self.assertIn("--cpus-per-task=1", args)
+            self.assertIn("--array=0-1%2", args)
+        self.assertIn("--time=04:00:00", arrays[1])
+
+        def run_task(args, index):
+            command = ["bash", *args[-2:]]
+            task_env = dict(os.environ, SLURM_ARRAY_TASK_ID=str(index))
+            subprocess.run(command, cwd=batch, env=task_env, check=True, timeout=10)
+
+        run_task(arrays[0], 0)
+        run_task(arrays[0], 1)
+        run_task(arrays[1], 0)
+        partial_name = Path(arrays[1][-1]).read_text().splitlines()[1]
+        partial_data = batch / "results" / (partial_name + "_data.dat")
+        partial_data.write_text("interrupted simulation")
+        refused = self.run_script("analyse.sh", batch)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("OK for every simulation", refused.stderr)
+        refused_retry = self.run_script("submit_campaign.sh", "--retry", batch,
+                                        env=dict(env, ACTIVE_JOB="1234_1"))
+        self.assertNotEqual(refused_retry.returncode, 0)
+        self.assertIn("still in the queue", refused_retry.stderr)
+
+        retry = self.run_script("submit_campaign.sh", "--retry", batch, env=env)
+        self.assertEqual(retry.returncode, 0, retry.stdout + retry.stderr)
+        arrays = [json.loads(line) for line in submissions.read_text().splitlines()]
+        self.assertEqual(len(arrays), 3)
+        self.assertIn("--array=1%2", arrays[2])
+        run_task(arrays[2], 1)
+        archived, = (batch / "slurm" / "attempts").glob(f"*/{partial_data.name}")
+        self.assertEqual(archived.read_text(), "interrupted simulation")
+        result = self.run_script("analyse.sh", batch)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        rows = list(csv.DictReader((batch / "runs.csv").read_text().splitlines()))
+        self.assertEqual([r["status"] for r in rows], ["OK"] * 4)
+        self.assertEqual(len(list((batch / "results").glob("*_data.dat"))), 4)
+        self.assertTrue((batch / "u_vs_rxi.png").is_file())
 
     def test_preflight_rejects_reused_seeds_and_colliding_points(self):
         history = self.root / "old"

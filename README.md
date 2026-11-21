@@ -27,7 +27,7 @@ Edit the lattice sizes, inverse temperatures and seed range in [campaigns/sigma5
 bash simulate.sh campaigns/sigma5.conf
 ```
 
-The launcher prints the batch directory. After the runs finish, choose block sizes and set `BLOCK_SIZES` in that directory’s saved `campaign.conf`. Then run `bash analyse.sh runs/YOUR_BATCH` with the printed path. The [workflow guide](docs/ising-workflow.md) explains how to choose block sizes, configure perturbations and run independent replicas. For Slurm jobs, see the [cluster instructions](cluster/README.md).
+The launcher prints the batch directory. After the runs finish, choose block sizes and set `BLOCK_SIZES` in that directory’s saved `campaign.conf`. Then run `bash analyse.sh runs/YOUR_BATCH` with the printed path. The [workflow guide](docs/ising-workflow.md) explains how to choose block sizes, configure perturbations and run independent replicas. On Magellano, use `bash submit_campaign.sh campaigns/sigma5.conf` to submit the campaign as Slurm arrays. See the [cluster instructions](cluster/README.md) for time limits and retries.
 
 ## Analysis
 

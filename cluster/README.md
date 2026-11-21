@@ -9,6 +9,43 @@ make test
 exit
 ```
 
+## Submit a campaign
+
+From the project directory on Magellano, edit your campaign `.conf` and submit it.
+
+```bash
+bash submit_campaign.sh campaigns/sigma5.conf
+```
+
+Use a current `ising` executable built with `make ising` on a compute node.
+The launcher copies the executable and configuration into one campaign folder.
+It submits one array per lattice size, with one CPU and 1 GiB of memory per replica.
+Each replica writes its own files to the same `results/` directory.
+
+Optional settings in the campaign config:
+
+- `SLURM_PARTITIONS=levante,mefisto,zefiro` sets the eligible partitions (the default).
+- `SLURM_TIME=1-00:00:00` sets the default wall-time limit per replica.
+  `SLURM_TIME_BY_L="48:12:00:00 64:18:00:00"` overrides it for individual sizes.
+- `SLURM_MAX_RUNNING=32` limits each size array to 32 running tasks. Every task
+  still counts toward Slurm's submission limits. `MAX_JOBS` controls the local
+  launcher.
+
+The launcher prints the campaign path and the job IDs. Use `squeue -u "$USER"`
+to check progress. Once the arrays finish, analyse the folder as usual.
+
+```bash
+bash analyse.sh runs/YOUR_BATCH
+```
+
+If a submission fails or a replica exits early, wait for the campaign's queued
+tasks to finish and run `bash submit_campaign.sh --retry runs/YOUR_BATCH`.
+This resubmits incomplete replicas from their original inputs. Earlier partial
+files are saved under `slurm/attempts/`. The analysis requires a successful exit
+and a measurement file for every replica.
+
+## Submit a small fixed-node job
+
 From the repository directory, prepare and submit a short test:
 
 ```bash
