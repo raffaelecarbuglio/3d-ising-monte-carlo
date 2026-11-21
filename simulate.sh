@@ -3,7 +3,12 @@
 set -Eeuo pipefail
 export LC_ALL=C
 
-CONF=$(realpath "${1:?Usage: bash simulate.sh campaign.conf}")
+prepare_only=false
+if [[ ${1:-} == --prepare-only ]]; then
+    prepare_only=true
+    shift
+fi
+CONF=$(realpath "${1:?Usage: bash simulate.sh [--prepare-only] campaign.conf}")
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 cd "$ROOT"
 BETA_GRID=()
@@ -57,7 +62,9 @@ trap 'exit 143' TERM
 mkdir "$BATCH/inputs" "$BATCH/results"
 cp "$CONF" "$BATCH/campaign.conf"
 printf 'name,L,beta,seed,n_therm,n_sweeps,measure_every,input_file,data_file,config_file,log_file,status,exit_code\n' > "$BATCH/runs.csv"
-echo "Batch directory: $BATCH"
+if ! $prepare_only; then
+    echo "Batch directory: $BATCH"
+fi
 
 # Prepare every input before starting any simulation.
 run_id=0
@@ -110,6 +117,12 @@ for size in "${!replicas_by_size[@]}"; do
     [[ -n ${seen_size[$size]+x} ]] || fail "REPLICAS_BY_L contains L=$size, absent from BETA_GRID."
 done
 SEED_HISTORY=("${SEED_HISTORY[@]:-$ROOT}")
+if $prepare_only; then
+    python3 cluster/check_seeds.py "$BATCH/inputs" --against "${SEED_HISTORY[@]}" >&2
+    trap - EXIT
+    printf '%s\n' "$BATCH"
+    exit 0
+fi
 python3 cluster/check_seeds.py "$BATCH/inputs" --against "${SEED_HISTORY[@]}"
 make ising
 echo "Prepared $run_id simulations; at most $MAX_JOBS run together."

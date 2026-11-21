@@ -71,8 +71,8 @@ Paths in configurations are relative to the project directory; output paths cann
 contain spaces or commas because of the C input and CSV formats. The `.conf` files
 are ordinary Bash code and should be files you wrote or reviewed. The existing
 `run_metropolis.sh`, `run_wolff.sh` and direct `analyze_grid.sh` commands still work.
-These new launch commands run on the local machine; use the existing `cluster/`
-workflow for Slurm submission on INFN.
+On Magellano, use `bash submit_campaign.sh CAMPAIGN.conf` with the same configuration.
+See the [cluster instructions](../cluster/README.md) for Slurm settings.
 
 ## Further analysis
 
