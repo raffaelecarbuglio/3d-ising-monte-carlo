@@ -1,0 +1,73 @@
+# L beta Rxi err_Rxi U err_U
+# sigma = 5
+# lambda = 0
+# noise_mode = independent
+# replicas = 32
+# errors = paired block bootstrap, 3000 resamples, seed 20261101
+48 0.38048280000000001 0.31619352592404576 0.00049120677897074381 2.46446159317891 0.0032065059421425139
+# sigma = 5
+# lambda = 0
+# noise_mode = independent
+# replicas = 32
+# errors = paired block bootstrap, 3000 resamples, seed 20261101
+48 0.3813687 0.3758424377023723 0.0005714448626521286 2.2595381966089958 0.0029580181247998889
+# sigma = 5
+# lambda = 0
+# noise_mode = independent
+# replicas = 32
+# errors = paired block bootstrap, 3000 resamples, seed 20261101
+48 0.38205640000000002 0.43945559102457227 0.00071650149880340269 2.0611548164209674 0.002825322681794694
+# sigma = 5
+# lambda = 0
+# noise_mode = independent
+# replicas = 32
+# errors = paired block bootstrap, 3000 resamples, seed 20261101
+48 0.38248280000000001 0.48875872490574318 0.00077602836864079823 1.9271687942847209 0.0026453591347899387
+# sigma = 5
+# lambda = 0
+# noise_mode = independent
+# replicas = 32
+# errors = paired block bootstrap, 3000 resamples, seed 20261101
+48 0.3828704 0.544294610096269 0.00087399232819284636 1.7944010140962026 0.0025112374404648624
+# sigma = 5
+# lambda = 0
+# noise_mode = independent
+# replicas = 32
+# errors = paired block bootstrap, 3000 resamples, seed 20261101
+48 0.38317089999999998 0.59232730725260085 0.00092663103586314354 1.6949215819432062 0.0023251606009219937
+# sigma = 5
+# lambda = 0
+# noise_mode = independent
+# replicas = 32
+# errors = paired block bootstrap, 3000 resamples, seed 20261101
+48 0.38343389999999999 0.64278387007954585 0.0009909227115809697 1.608085700986468 0.0020446899384326798
+# sigma = 5
+# lambda = 0
+# noise_mode = independent
+# replicas = 32
+# errors = paired block bootstrap, 3000 resamples, seed 20261101
+48 0.38366479999999997 0.68836076230259968 0.0010259593495693796 1.53679249837624 0.0018513561743118702
+# sigma = 5
+# lambda = 0
+# noise_mode = independent
+# replicas = 32
+# errors = paired block bootstrap, 3000 resamples, seed 20261101
+48 0.3838799 0.73438850105699338 0.0011034297689470503 1.4769868897762446 0.0017770656098055656
+# sigma = 5
+# lambda = 0
+# noise_mode = independent
+# replicas = 32
+# errors = paired block bootstrap, 3000 resamples, seed 20261101
+48 0.38407150000000001 0.77952518263201787 0.0011555207315964667 1.4244389292849808 0.0016114173288276541
+# sigma = 5
+# lambda = 0
+# noise_mode = independent
+# replicas = 32
+# errors = paired block bootstrap, 3000 resamples, seed 20261101
+48 0.38445950000000001 0.87990335102350692 0.0012310283841960156 1.3290712166985315 0.0013095120863571782
+# sigma = 5
+# lambda = 0
+# noise_mode = independent
+# replicas = 32
+# errors = paired block bootstrap, 3000 resamples, seed 20261101
+48 0.38478800000000002 0.97430478960053746 0.0012749297462986094 1.2619241518668525 0.0010731161260002116
