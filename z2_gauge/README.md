@@ -23,7 +23,8 @@ choose a different `data_file` for each new run.
 1. `z2.h`: the lattice and the public functions.
 2. `z2.c`: neighbours, plaquettes, energy, and the Metropolis sweep.
 3. `main_z2.c`: input, thermalisation, and measurement output.
-4. `../tests/test_z2.c`: small checks of the physics and periodic boundaries.
+4. `analyze_energy.py`: energy cumulants and their statistical errors.
+5. `../tests/test_z2.c`: small checks of the physics and periodic boundaries.
 
 The root `Makefile` builds both simulators with `make` and runs both C test
 suites with `make test`. `make test-z2` runs only the gauge checks.
@@ -65,9 +66,8 @@ It changes the Monte Carlo dynamics, so this sweep is a different time unit
 from a sweep that proposes all 3 L^3 flips. On average it makes 1.5 L^3
 flip proposals. At beta=0, one pass generates independent random links.
 
-The output acceptance is the number of accepted flips divided by the number
-of proposed flips since the previous measurement; skipped visits are
-excluded. If that interval contains no proposals, acceptance is recorded as 0.
+The run summary prints the fraction of proposed flips accepted during
+production. Skipped visits are excluded.
 
 ## Input
 
@@ -100,33 +100,35 @@ link indices and total energies within the same integer type.
 
 ## Measurements
 
-The header records the parameters and conventions. Numeric columns are:
+The header records the run parameters. Each data row contains the exact
+integer total energy. Data row `k` corresponds to production sweep
+`k * measure_every`, with the first data row numbered 1. Divide the energy
+by `3 * L**3` to get the energy per plaquette. Output is flushed every 1024
+measurements and when the file closes.
 
-```text
-sweep    total_energy    acceptance
+## Analyze the energy
+
+```bash
+python3 z2_gauge/analyze_energy.py data/z2_energy.dat --block-size 50
 ```
 
-Sweep numbering starts at 1 after thermalisation. The energy is an exact
-integer: it is not divided by the volume. The energy per plaquette is
-`total_energy / (3 * L**3)`, and the mean plaquette in a configuration is its
-negative. Saving total energy lets you calculate its moments and cumulants
-later, with the normalisation you choose. Python can load the columns with:
+The script reports `C3 = <(E - <E>)^3> / L^3` and
+`C4 = (<(E - <E>)^4> - 3 * <(E - <E>)^2>^2) / L^3`.
+It accepts `.dat` and `.dat.gz`, including older pilot files with three
+columns (`sweep total_energy acceptance`). To pool replicas, pass their
+files together. They must share `L`, `beta`, and `measure_every`, with
+distinct seeds.
 
-```python
-import numpy as np
+`--block-size` counts measurements. With `measure_every = 10`, a block of
+50 measurements spans 500 sweeps. Choose the block size by checking that the
+errors stabilize as you increase it. `--discard N` skips the first `N`
+saved measurements in each replica, useful for pilots with `n_therm = 0`.
 
-sweep, energy, acceptance = np.loadtxt("data/z2_energy.dat", unpack=True)
-L = 8  # Match the input.
-energy_per_plaquette = energy / (3 * L**3)
-```
-
-Measurements are flushed to disk after every row. As with your Ising runs,
-thermalisation and statistical errors require checking autocorrelations and
-blocking before production results can be used.
-
-This first version implements the unperturbed model, ordered/random starts,
-and energy measurements. It does not yet implement restart files,
-perturbations, Wilson loops, or statistical analysis.
+The script reads a chunk at a time and keeps four sums of powers of the
+individual energies per complete block. It estimates errors by dropping one
+block at a time and recomputing both cumulants. Blocks stay within a replica,
+and any incomplete final block is dropped. Use `--blocks-out blocks.txt`
+to save the sums for later resampling.
 
 ## Checks
 

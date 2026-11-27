@@ -65,6 +65,7 @@ static int read_input(const char *filename, Parameters *p)
 
 static int run_simulation(const Parameters *p)
 {
+    const int flush_every = 1024;  /* Measured rows, not sweeps. */
     GaugeLattice g;
     Pcg32 rng;
     long long proposed = 0;
@@ -96,8 +97,8 @@ static int run_simulation(const Parameters *p)
                 "# L = %d\n# beta = %.17g\n# seed = %d\n# start = %s\n"
                 "# n_therm = %d\n# n_sweeps = %d\n# measure_every = %d\n"
                 "# sweep: one pass over 3*L^3 links; 50%% chance to propose a flip\n"
-                "# acceptance: accepted flips / proposed flips since last measure\n"
-                "# columns: sweep total_energy acceptance\n",
+                "# measurement row k (starting at 1) is production sweep k*measure_every\n"
+                "# columns: total_energy\n",
                 p->L, p->beta, p->seed, p->start,
                 p->n_therm, p->n_sweeps, p->measure_every) < 0
         || fflush(data) != 0) {
@@ -122,18 +123,17 @@ static int run_simulation(const Parameters *p)
         proposed += result.proposed;
         accepted += result.accepted;
 
-        if ((sweep + 1) % p->measure_every == 0) {
+        int production_sweep = sweep + 1;
+        if (production_sweep % p->measure_every == 0) {
             int energy = z2_total_energy(&g);
-            double acceptance = proposed > 0 ? (double)accepted / proposed : 0.0;
+            int row = production_sweep / p->measure_every;
 
-            if (fprintf(data, "%d %d %.17g\n", sweep + 1, energy, acceptance) < 0
-                || fflush(data) != 0) {
+            if (fprintf(data, "%d\n", energy) < 0
+                || (row % flush_every == 0 && fflush(data) != 0)) {
                 fprintf(stderr, "Error writing measurements.\n");
                 ok = 0;
                 break;
             }
-            proposed = 0;
-            accepted = 0;
         }
     }
 
@@ -143,8 +143,11 @@ static int run_simulation(const Parameters *p)
     }
     z2_destroy(&g);
 
-    if (ok)
+    if (ok) {
+        double acceptance = proposed > 0 ? (double)accepted / proposed : 0.0;
+        printf("Production acceptance: %.6f\n", acceptance);
         printf("Done. Measurements: %s\n", p->data_file);
+    }
     return ok;
 }
 
