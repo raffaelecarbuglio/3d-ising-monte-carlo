@@ -39,14 +39,18 @@ def read_blocks(filename, block_size, discard, reference):
         blocks = []
         tail = 0
         columns = None
-        while lines := list(islice(rows, chunk_rows)):
+        while True:
+            lines = list(islice(rows, chunk_rows))
+            if not lines:
+                break
             data = np.loadtxt(lines, ndmin=2)
             del lines
             if columns is None:
                 columns = data.shape[1]
             if columns not in (1, 3) or data.shape[1] != columns:
                 raise ValueError("expected total_energy or sweep total_energy acceptance")
-            energy = data[:, 0 if columns == 1 else 1]
+            energy_column = 0 if columns == 1 else 1
+            energy = data[:, energy_column]
             if not np.all((np.abs(energy) <= 3 * L**3) & (energy == np.floor(energy))):
                 raise ValueError("invalid total energy")
 
@@ -55,14 +59,16 @@ def read_blocks(filename, block_size, discard, reference):
             if used == 0:
                 break
             if reference is None:
-                # Any common offset works. A nearby one limits cancellation.
+                # Subtract the same offset in every block and replica.
+                # A value near the mean keeps the powers of E - reference small.
                 reference = energy[:used].mean()
-            shifted = (energy[:used] - reference).reshape(-1, block_size)
-            squared = shifted**2
+            # Each row contains one block. Sum each power across that row.
+            energy_by_block = (energy[:used] - reference).reshape(-1, block_size)
+            squared = energy_by_block**2
             blocks.append(np.column_stack((
-                shifted.sum(axis=1),
+                energy_by_block.sum(axis=1),
                 squared.sum(axis=1),
-                (squared * shifted).sum(axis=1),
+                (squared * energy_by_block).sum(axis=1),
                 (squared**2).sum(axis=1),
             )))
 
@@ -117,11 +123,12 @@ def main():
     if nblocks < 2:
         parser.error("need at least two complete blocks for the jackknife")
 
-    # Evaluate the cumulants on all samples and again with each block removed.
     used = nblocks * args.block_size
-    total = block_sums.sum(axis=0)
-    values = cumulants(total / used, L**3)
-    leave_one_out = cumulants((total - block_sums) / (used - args.block_size), L**3)
+    total_sums = block_sums.sum(axis=0)
+    values = cumulants(total_sums / used, L**3)
+    # For each jackknife sample, subtract that block's sums and sample count.
+    remaining_count = used - args.block_size
+    leave_one_out = cumulants((total_sums - block_sums) / remaining_count, L**3)
     deviations = leave_one_out - leave_one_out.mean(axis=0)
     errors = np.sqrt((nblocks - 1) / nblocks * (deviations**2).sum(axis=0))
 
