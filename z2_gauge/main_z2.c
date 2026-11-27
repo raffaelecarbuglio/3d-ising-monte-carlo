@@ -66,6 +66,8 @@ static int read_input(const char *filename, Parameters *p)
 static int run_simulation(const Parameters *p)
 {
     const int flush_every = 1024;  /* Measured rows, not sweeps. */
+    /* The only positive flip costs are 4 and 8, and beta is fixed for the run. */
+    const double probability[3] = {1.0, exp(-4.0 * p->beta), exp(-8.0 * p->beta)};
     GaugeLattice g;
     Pcg32 rng;
     long long proposed = 0;
@@ -113,13 +115,13 @@ static int run_simulation(const Parameters *p)
     printf("Thermalisation: %d sweeps.\n", p->n_therm);
     fflush(stdout);
     for (int sweep = 0; sweep < p->n_therm; sweep++)
-        z2_metropolis_sweep(&g, p->beta, &rng);
+        z2_metropolis_sweep(&g, probability, &rng);
 
     printf("Production: %d sweeps, measurement every %d.\n",
            p->n_sweeps, p->measure_every);
     fflush(stdout);
     for (int sweep = 0; sweep < p->n_sweeps; sweep++) {
-        SweepResult result = z2_metropolis_sweep(&g, p->beta, &rng);
+        SweepResult result = z2_metropolis_sweep(&g, probability, &rng);
         proposed += result.proposed;
         accepted += result.accepted;
 

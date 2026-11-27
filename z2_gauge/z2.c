@@ -1,8 +1,25 @@
 #include "z2.h"
 
-#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+/* Find a neighbor by coordinates while building the table. */
+static int neighbor_index(const GaugeLattice *g, int site, int direction, int step)
+{
+    int x = site % g->L;
+    int y = (site / g->L) % g->L;
+    int z = site / (g->L * g->L);
+    int coordinates[3] = {x, y, z};
+
+    coordinates[direction] += step;
+    if (coordinates[direction] < 0)
+        coordinates[direction] += g->L;
+    if (coordinates[direction] == g->L)
+        coordinates[direction] = 0;
+
+    return (coordinates[2] * g->L + coordinates[1]) * g->L
+           + coordinates[0];
+}
 
 int z2_create(GaugeLattice *g, int L)
 {
@@ -16,9 +33,18 @@ int z2_create(GaugeLattice *g, int L)
     g->L = L;
     g->volume = L * L * L;
     g->links = malloc((size_t)(3 * g->volume) * sizeof(*g->links));
-    if (g->links == NULL) {
+    g->neighbors = malloc((size_t)g->volume * sizeof(*g->neighbors));
+    if (g->links == NULL || g->neighbors == NULL) {
         fprintf(stderr, "Not enough memory for the lattice.\n");
+        z2_destroy(g);
         return 0;
+    }
+
+    for (int site = 0; site < g->volume; site++) {
+        for (int direction = 0; direction < 3; direction++) {
+            g->neighbors[site][2 * direction] = neighbor_index(g, site, direction, -1);
+            g->neighbors[site][2 * direction + 1] = neighbor_index(g, site, direction, 1);
+        }
     }
     return 1;
 }
@@ -26,6 +52,7 @@ int z2_create(GaugeLattice *g, int L)
 void z2_destroy(GaugeLattice *g)
 {
     free(g->links);
+    free(g->neighbors);
     *g = (GaugeLattice){0};
 }
 
@@ -41,22 +68,11 @@ void z2_fill_random(GaugeLattice *g, Pcg32 *rng)
         g->links[i] = pcg32_bit(rng) ? 1 : -1;
 }
 
-/* Move one lattice step, with periodic boundaries. step is +1 or -1. */
+/* Each direction has a pair of entries, backward first and forward second. */
 static int neighbor(const GaugeLattice *g, int site, int direction, int step)
 {
-    int x = site % g->L;
-    int y = (site / g->L) % g->L;
-    int z = site / (g->L * g->L);
-    int coordinates[3] = {x, y, z};
-
-    coordinates[direction] += step;
-    if (coordinates[direction] < 0)
-        coordinates[direction] += g->L;
-    if (coordinates[direction] == g->L)
-        coordinates[direction] = 0;
-
-    return (coordinates[2] * g->L + coordinates[1]) * g->L
-           + coordinates[0];
+    int side = step > 0 ? 1 : 0;
+    return g->neighbors[site][2 * direction + side];
 }
 
 int z2_plaquette(const GaugeLattice *g, int site, int mu, int nu)
@@ -105,7 +121,8 @@ int z2_total_energy(const GaugeLattice *g)
     return energy;
 }
 
-SweepResult z2_metropolis_sweep(GaugeLattice *g, double beta, Pcg32 *rng)
+SweepResult z2_metropolis_sweep(GaugeLattice *g, const double probability[3],
+                                Pcg32 *rng)
 {
     SweepResult result = {0, 0};
 
@@ -120,7 +137,7 @@ SweepResult z2_metropolis_sweep(GaugeLattice *g, double beta, Pcg32 *rng)
             result.proposed++;
             int dE = z2_delta_energy(g, site, mu);
 
-            if (dE <= 0 || pcg32_uniform(rng) < exp(-beta * dE)) {
+            if (dE <= 0 || pcg32_uniform(rng) < probability[dE / 4]) {
                 g->links[3 * site + mu] *= -1;
                 result.accepted++;
             }

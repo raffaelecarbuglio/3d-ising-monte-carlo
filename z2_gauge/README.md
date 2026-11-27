@@ -84,7 +84,7 @@ start = ordered
 data_file = data/z2_energy.dat
 ```
 
-- `L`: integer from 2 to 512. Memory grows as 3 L^3 integers.
+- `L`: integer from 2 to 512. The lattice stores 3 links and 6 neighbor indices per site.
 - `beta`: finite, nonnegative inverse temperature.
 - `n_therm`: nonnegative number of sweeps to discard before production.
 - `n_sweeps`: positive number of production sweeps.

@@ -89,8 +89,9 @@ static void test_zero_beta(void)
     double sum = 0.0;
     double sum_squared = 0.0;
     const int samples = 10000;
+    const double probability[3] = {1.0, 1.0, 1.0};
     for (int i = 0; i < samples; i++) {
-        SweepResult result = z2_metropolis_sweep(&g, 0.0, &rng);
+        SweepResult result = z2_metropolis_sweep(&g, probability, &rng);
         assert(result.accepted == result.proposed);
         double energy = z2_total_energy(&g);
         sum += energy;
